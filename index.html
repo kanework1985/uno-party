@@ -210,6 +210,19 @@
     .hand-scroll::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.06); border-radius: 99px; }
     .hand-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.25); border-radius: 99px; }
 
+    /* 可自行移動的獨立遊戲說明區塊 */
+    #guide-panel {
+      touch-action: auto;
+    }
+    #guide-drag-handle {
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+    }
+    #guide-drag-handle:active {
+      cursor: grabbing;
+    }
+
     /* QR Code 容器修正 */
     #qrcode-box img, #qrcode-box canvas {
       margin: 0 auto;
@@ -247,6 +260,9 @@
           <span id="conn-dot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
           <span id="conn-text">初始化中</span>
         </span>
+        <button id="btn-guide-toggle" type="button" class="rounded-xl bg-amber-400/15 hover:bg-amber-400/25 border border-amber-400/40 px-2.5 py-1.5 text-xs font-bold text-amber-200 transition" title="開啟或隱藏遊戲說明">
+          📖 說明
+        </button>
         <button id="btn-bgm-quick" type="button" class="rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/10 px-2.5 py-1.5 text-xs font-bold text-slate-200 transition" title="開關背景音樂">
           🎵 音樂關
         </button>
@@ -747,6 +763,63 @@
       </div>
     </section>
   </main>
+
+  <!-- ========================================================================
+       完整遊戲說明（獨立浮動區塊：可自由拖曳移動、收合與隱藏）
+       ======================================================================== -->
+  <aside id="guide-panel" class="fixed right-4 bottom-4 z-40 w-[92vw] max-w-sm rounded-3xl bg-slate-900/95 border-2 border-amber-400/40 shadow-2xl backdrop-blur-md overflow-hidden">
+    <!-- 可拖曳標題列 -->
+    <div id="guide-drag-handle" class="flex items-center justify-between gap-2 px-4 py-3 bg-gradient-to-r from-indigo-950/90 via-slate-900 to-slate-900 border-b border-white/10">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="text-slate-400 text-sm leading-none" title="按住此處拖曳移動">⠿</span>
+        <div class="truncate">
+          <div class="text-sm font-black text-amber-300 truncate">📖 完整遊戲說明</div>
+          <div class="text-[10px] text-slate-400 truncate">按住標題列可自由拖曳移動</div>
+        </div>
+      </div>
+      <div class="flex items-center gap-1.5 shrink-0">
+        <button id="btn-guide-collapse" type="button" class="rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/10 px-2 py-1 text-[11px] font-bold text-slate-200 transition" title="收合/展開內容">
+          收合 ▾
+        </button>
+        <button id="btn-guide-close" type="button" class="rounded-lg bg-slate-800 hover:bg-rose-600 border border-white/10 px-2 py-1 text-[11px] font-bold text-slate-200 transition" title="隱藏說明區塊">
+          ✕
+        </button>
+      </div>
+    </div>
+
+    <!-- 說明內容主體（可捲動與收合） -->
+    <div id="guide-body" class="p-4 space-y-3 max-h-[60dvh] overflow-y-auto text-xs leading-relaxed text-slate-200">
+      <div class="rounded-2xl bg-slate-950/75 border border-white/10 p-3">
+        <div class="font-black text-amber-300 mb-1">1. 掃碼加入與斷線重連</div>
+        <p class="text-slate-300">房主以電腦或電視開啟大廳產生 QR Code，玩家用手機掃碼輸入暱稱即可報到；開局後手機只顯示個人手牌防偷看。若手機休眠斷線，重開原連結即可自動恢復手牌，房主也可隨時踢除離線玩家避免卡局。</p>
+      </div>
+
+      <div class="rounded-2xl bg-slate-950/75 border border-white/10 p-3">
+        <div class="font-black text-sky-300 mb-1">2. 依人數自動匹配牌庫</div>
+        <p class="text-slate-300">2–4 人用 1 副（發 7 張）、5–8 人用 2 副（發 7 張）、9–12 人用 3 副（發 6 張）、13 人以上每增 4 人多混 1 副（發 5 張）。牌庫抽完會自動將棄牌堆（保留最上方 1 張）重洗補回。</p>
+      </div>
+
+      <div class="rounded-2xl bg-slate-950/75 border border-white/10 p-3">
+        <div class="font-black text-emerald-300 mb-1">3. 標準 UNO 出牌與喊 UNO 抓包</div>
+        <p class="text-slate-300">同色、同數字或同符號即可出牌，萬用牌隨時可出；功能牌含 +2、+4、跳過、迴轉（2 人局迴轉視同跳過）。剩 2 張出牌前或剩 1 張時需按「📣 喊 UNO!」，未喊若被他人按「🚨 抓沒喊 UNO」立即罰抽 2 張！</p>
+      </div>
+
+      <div class="rounded-2xl bg-rose-950/40 border border-rose-400/30 p-3">
+        <div class="font-black text-rose-300 mb-1">4. 逾時「出好牌、留爛牌」懲罰</div>
+        <p class="text-slate-300">每回合倒數 1–20 秒（最後 3 秒閃爍警示）。倒數歸零時，有牌可出將依序強制丟掉最強好牌：<span class="text-amber-300 font-bold">+4 → 變色 → +2 → 跳過 → 迴轉 → 手牌最稀缺大點數</span>；無牌可出則強制抽 1 張並直接結束回合。</p>
+      </div>
+
+      <div class="rounded-2xl bg-slate-950/75 border border-white/10 p-3">
+        <div class="font-black text-purple-300 mb-1">5. 爆牌淘汰・限時模式・最後 10% 加速</div>
+        <p class="text-slate-300">房主可開啟「爆牌淘汰上限」（滿張立即淘汰洗回牌庫）與「遊戲總限時＋獲勝名額人數」（時間到依剩餘張數最少排名勝出）。當總時間剩餘 10% 時，全場將跳出警示並自動<span class="text-rose-300 font-bold">加快速度 50%</span>！</p>
+      </div>
+
+      <div class="rounded-2xl bg-slate-950/75 border border-white/10 p-3">
+        <div class="font-black text-indigo-300 mb-1">6. 主題牌面與音樂音效自訂</div>
+        <p class="text-slate-300">在可收合的「派對遊戲設定中心」可自訂遊戲主題名稱與牌面顯示名稱，也能自行匯入本機背景音樂與 6 種事件音效並獨立調整音量。</p>
+      </div>
+    </div>
+  </aside>
 
   <!-- ========================================================================
        萬用牌選色彈窗 (Wild / +4 出牌時使用)
@@ -2954,6 +3027,85 @@
       $('btn-play-again').addEventListener('click', hostBackToLobby);
       $('btn-close-winner').addEventListener('click', () => {
         $('winner-modal').classList.add('hidden');
+      });
+
+      // 獨立遊戲說明區塊：顯示/隱藏、收合/展開、自由拖曳移動（支援滑鼠與觸控）
+      initDraggableGuidePanel();
+    }
+
+    function initDraggableGuidePanel() {
+      const panel = $('guide-panel');
+      const handle = $('guide-drag-handle');
+      const body = $('guide-body');
+      const btnToggle = $('btn-guide-toggle');
+      const btnCollapse = $('btn-guide-collapse');
+      const btnClose = $('btn-guide-close');
+      if (!panel || !handle) return;
+
+      let collapsed = false;
+
+      btnToggle.addEventListener('click', () => {
+        panel.classList.toggle('hidden');
+      });
+
+      btnClose.addEventListener('click', (e) => {
+        e.stopPropagation();
+        panel.classList.add('hidden');
+      });
+
+      btnCollapse.addEventListener('click', (e) => {
+        e.stopPropagation();
+        collapsed = !collapsed;
+        body.classList.toggle('hidden', collapsed);
+        btnCollapse.textContent = collapsed ? '展開 ▸' : '收合 ▾';
+      });
+
+      // 指標拖曳實作（點擊按鈕時不觸發拖曳）
+      let dragging = false;
+      let offsetX = 0;
+      let offsetY = 0;
+
+      handle.addEventListener('pointerdown', (e) => {
+        if (e.target.closest('button')) return;
+        dragging = true;
+        const rect = panel.getBoundingClientRect();
+        // 切換為 left/top 定位方便任意拖曳
+        panel.style.left = `${rect.left}px`;
+        panel.style.top = `${rect.top}px`;
+        panel.style.right = 'auto';
+        panel.style.bottom = 'auto';
+        offsetX = e.clientX - rect.left;
+        offsetY = e.clientY - rect.top;
+        try { handle.setPointerCapture(e.pointerId); } catch {}
+      });
+
+      handle.addEventListener('pointermove', (e) => {
+        if (!dragging) return;
+        const maxLeft = Math.max(8, window.innerWidth - panel.offsetWidth - 8);
+        const maxTop = Math.max(8, window.innerHeight - 52);
+        const nextLeft = Math.max(8, Math.min(maxLeft, e.clientX - offsetX));
+        const nextTop = Math.max(8, Math.min(maxTop, e.clientY - offsetY));
+        panel.style.left = `${nextLeft}px`;
+        panel.style.top = `${nextTop}px`;
+      });
+
+      const stopDrag = (e) => {
+        if (!dragging) return;
+        dragging = false;
+        try { handle.releasePointerCapture(e.pointerId); } catch {}
+      };
+      handle.addEventListener('pointerup', stopDrag);
+      handle.addEventListener('pointercancel', stopDrag);
+
+      // 視窗縮放時確保說明視窗不會跑出畫面外
+      window.addEventListener('resize', () => {
+        if (panel.style.left && panel.style.left !== 'auto') {
+          const rect = panel.getBoundingClientRect();
+          const clampedLeft = Math.max(8, Math.min(window.innerWidth - rect.width - 8, rect.left));
+          const clampedTop = Math.max(8, Math.min(window.innerHeight - 52, rect.top));
+          panel.style.left = `${clampedLeft}px`;
+          panel.style.top = `${clampedTop}px`;
+        }
       });
     }
 
