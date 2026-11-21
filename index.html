@@ -1,0 +1,2973 @@
+<!DOCTYPE html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <title>UNO 派對大亂鬥 — 線上多人掃碼即玩</title>
+
+  <!-- 引入 Tailwind CSS (排版與響應式樣式) -->
+  <script src="https://cdn.tailwindcss.com/3.4.17"></script>
+  <!-- 引入 PeerJS (WebRTC 點對點連線，免後端伺服器) -->
+  <script src="https://unpkg.com/peerjs@1.5.5/dist/peerjs.min.js"></script>
+  <!-- 引入 QRCode.js (動態產生加入房間 QR Code) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+  <!-- 引入 Canvas Confetti (勝利彩帶慶祝特效) -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.9.3/dist/confetti.browser.min.js"></script>
+
+  <style>
+    /* ==========================================================================
+       全域樣式與 UNO 經典卡牌視覺設計
+       ========================================================================== */
+    :root {
+      --uno-red: #ef4444;
+      --uno-red-dark: #b91c1c;
+      --uno-yellow: #facc15;
+      --uno-yellow-dark: #ca8a04;
+      --uno-green: #22c55e;
+      --uno-green-dark: #15803d;
+      --uno-blue: #3b82f6;
+      --uno-blue-dark: #1d4ed8;
+      --uno-wild: #1e1b4b;
+    }
+
+    * {
+      -webkit-tap-highlight-color: transparent;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: "Inter", "Noto Sans TC", "PingFang TC", "Microsoft JhengHei", system-ui, sans-serif;
+      background: radial-gradient(circle at 20% 20%, #1e1b4b 0%, #0f172a 55%, #020617 100%);
+      color: #f8fafc;
+      min-height: 100dvh;
+      overflow-x: hidden;
+      margin: 0;
+    }
+
+    /* 經典 UNO 卡牌容器 */
+    .uno-card {
+      position: relative;
+      border-radius: 14px;
+      border: 4px solid #ffffff;
+      box-shadow: 0 10px 25px rgba(0, 0, 0, 0.45), inset 0 0 0 2px rgba(255, 255, 255, 0.2);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      user-select: none;
+      overflow: hidden;
+      transition: transform 0.18s cubic-bezier(0.22, 1, 0.36, 1), box-shadow 0.18s ease, opacity 0.18s ease;
+      flex-shrink: 0;
+    }
+
+    /* 卡牌內部傾斜白色橢圓 */
+    .uno-card::before {
+      content: "";
+      position: absolute;
+      width: 118%;
+      height: 68%;
+      background: rgba(255, 255, 255, 0.22);
+      border-radius: 50%;
+      transform: rotate(-28deg);
+      pointer-events: none;
+    }
+
+    .uno-card.color-red    { background: linear-gradient(145deg, #f87171, #dc2626 55%, #991b1b); }
+    .uno-card.color-yellow { background: linear-gradient(145deg, #fde047, #eab308 55%, #a16207); color: #1f2937; }
+    .uno-card.color-green  { background: linear-gradient(145deg, #4ade80, #16a34a 55%, #166534); }
+    .uno-card.color-blue   { background: linear-gradient(145deg, #60a5fa, #2563eb 55%, #1e40af); }
+    .uno-card.color-wild   { background: linear-gradient(145deg, #312e81, #0f172a 55%, #020617); }
+
+    /* 萬用牌四色扇形裝飾 */
+    .wild-emblem {
+      width: 68%;
+      aspect-ratio: 1 / 1;
+      border-radius: 50%;
+      background: conic-gradient(
+        var(--uno-red) 0deg 90deg,
+        var(--uno-blue) 90deg 180deg,
+        var(--uno-yellow) 180deg 270deg,
+        var(--uno-green) 270deg 360deg
+      );
+      border: 3px solid #fff;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      box-shadow: 0 4px 12px rgba(0, 0, 0, 0.45);
+      position: relative;
+      z-index: 2;
+    }
+
+    .uno-card-corner {
+      position: absolute;
+      font-weight: 900;
+      line-height: 1;
+      text-shadow: 0 2px 4px rgba(0, 0, 0, 0.45);
+      z-index: 2;
+    }
+    .uno-card-corner.tl { top: 6px; left: 8px; }
+    .uno-card-corner.br { bottom: 6px; right: 8px; transform: rotate(180deg); }
+
+    .uno-card-center {
+      position: relative;
+      z-index: 2;
+      font-weight: 900;
+      text-shadow: 0 3px 6px rgba(0, 0, 0, 0.45);
+      line-height: 1;
+    }
+
+    /* 牌面自訂品牌名稱標籤 */
+    .uno-card-brand {
+      position: absolute;
+      bottom: 6px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2;
+      font-size: 9px;
+      font-weight: 900;
+      letter-spacing: 0.08em;
+      color: rgba(255, 255, 255, 0.9);
+      text-shadow: 0 1px 3px rgba(0, 0, 0, 0.65);
+      white-space: nowrap;
+      max-width: 72%;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      pointer-events: none;
+    }
+
+    .uno-card.color-yellow .uno-card-corner,
+    .uno-card.color-yellow .uno-card-center,
+    .uno-card.color-yellow .uno-card-brand {
+      color: #ffffff;
+      text-shadow: 0 2px 5px rgba(120, 53, 15, 0.85);
+    }
+
+    /* 牌背設計 */
+    .uno-card-back {
+      background: linear-gradient(145deg, #1e293b, #020617);
+      border: 4px solid #ffffff;
+    }
+    .uno-card-back::before {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      opacity: 0.92;
+    }
+
+    /* 手機手牌互動狀態 */
+    .hand-card {
+      width: 92px;
+      height: 136px;
+      cursor: pointer;
+      scroll-snap-align: center;
+    }
+    .hand-card.playable {
+      transform: translateY(-10px);
+      box-shadow: 0 14px 28px rgba(250, 204, 21, 0.35), 0 0 0 3px #fde047;
+    }
+    .hand-card.playable:active {
+      transform: translateY(-18px) scale(1.05);
+    }
+    .hand-card.disabled {
+      opacity: 0.45;
+      filter: grayscale(0.35);
+      cursor: not-allowed;
+    }
+
+    /* 最後 3 秒倒數緊急閃爍警示 */
+    @keyframes urgentPulse {
+      0%, 100% {
+        box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.85);
+        background-color: rgba(220, 38, 38, 0.35);
+      }
+      50% {
+        box-shadow: 0 0 28px 6px rgba(239, 68, 68, 0.95);
+        background-color: rgba(239, 68, 68, 0.7);
+      }
+    }
+    .timer-urgent {
+      animation: urgentPulse 0.55s ease-in-out infinite;
+      border-color: #f87171 !important;
+    }
+
+    /* 逾時與系統廣播橫幅動畫 */
+    @keyframes bannerPop {
+      0%   { opacity: 0; transform: translate(-50%, -24px) scale(0.92); }
+      12%  { opacity: 1; transform: translate(-50%, 0) scale(1.02); }
+      85%  { opacity: 1; transform: translate(-50%, 0) scale(1); }
+      100% { opacity: 0; transform: translate(-50%, -14px) scale(0.96); }
+    }
+    .party-banner-anim {
+      animation: bannerPop 4.2s cubic-bezier(0.22, 1, 0.36, 1) forwards;
+    }
+
+    /* 設定分頁按鈕樣式 */
+    .settings-tab.active {
+      background: rgba(250, 204, 21, 0.2);
+      color: #fde047;
+      border-color: rgba(250, 204, 21, 0.5);
+    }
+
+    /* 手牌區隱藏捲軸但保留流暢滑動 */
+    .hand-scroll::-webkit-scrollbar { height: 6px; }
+    .hand-scroll::-webkit-scrollbar-track { background: rgba(255, 255, 255, 0.06); border-radius: 99px; }
+    .hand-scroll::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.25); border-radius: 99px; }
+
+    /* QR Code 容器修正 */
+    #qrcode-box img, #qrcode-box canvas {
+      margin: 0 auto;
+      display: block;
+      max-width: 100%;
+      height: auto !important;
+    }
+  </style>
+</head>
+<body class="antialiased selection:bg-amber-400 selection:text-slate-950">
+
+  <!-- 全域派對事件橫幅 (逾時強制丟好牌、抓沒喊 UNO、爆牌淘汰等高光笑果提示) -->
+  <div id="party-banner" class="hidden fixed top-4 left-1/2 -translate-x-1/2 z-50 w-[92%] max-w-2xl pointer-events-none">
+    <div id="party-banner-inner" class="rounded-2xl border-2 border-amber-300 bg-slate-900/95 px-5 py-3.5 text-center shadow-2xl backdrop-blur">
+      <div id="party-banner-text" class="text-base sm:text-xl font-black tracking-wide text-amber-300"></div>
+    </div>
+  </div>
+
+  <!-- 輕量提示吐司 (取代原生 alert) -->
+  <div id="toast-container" class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 flex flex-col gap-2 w-[90%] max-w-md pointer-events-none"></div>
+
+  <!-- 頂部共用極簡狀態列 -->
+  <header class="w-full border-b border-white/10 bg-slate-950/60 backdrop-blur sticky top-0 z-30">
+    <div class="max-w-7xl mx-auto px-4 py-2.5 flex items-center justify-between gap-2">
+      <div class="flex items-center gap-2.5 min-w-0">
+        <div id="header-card-badge" class="min-w-[36px] h-9 px-1.5 rounded-xl bg-gradient-to-br from-red-500 via-amber-400 to-blue-500 flex items-center justify-center font-black text-slate-950 text-xs shadow-lg shrink-0">UNO</div>
+        <div class="truncate">
+          <div id="header-title" class="font-black text-sm sm:text-base tracking-tight text-white truncate">UNO 派對大亂鬥</div>
+          <div id="header-subtitle" class="text-[11px] text-slate-400 truncate">純前端 P2P 掃碼即玩</div>
+        </div>
+      </div>
+
+      <div class="flex items-center gap-2 shrink-0">
+        <span id="conn-badge" class="inline-flex items-center gap-1.5 rounded-full bg-slate-800/90 border border-white/10 px-2.5 py-1 text-xs font-semibold text-slate-300">
+          <span id="conn-dot" class="w-2 h-2 rounded-full bg-amber-400 animate-pulse"></span>
+          <span id="conn-text">初始化中</span>
+        </span>
+        <button id="btn-bgm-quick" type="button" class="rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/10 px-2.5 py-1.5 text-xs font-bold text-slate-200 transition" title="開關背景音樂">
+          🎵 音樂關
+        </button>
+        <button id="btn-mute" type="button" class="rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/10 px-2.5 py-1.5 text-xs font-bold text-slate-200 transition" title="開關音效">
+          🔊 音效
+        </button>
+      </div>
+    </div>
+  </header>
+
+  <!-- ========================================================================
+       模式 A：房主大廳與大螢幕遊戲主畫面 (無 ?room= 參數)
+       ======================================================================== -->
+  <main id="host-root" class="hidden max-w-7xl mx-auto px-4 py-5">
+
+    <!-- A-1: 房主大廳畫面 -->
+    <section id="host-lobby" class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+
+      <!-- 左欄：QR Code 與加入資訊 -->
+      <div class="lg:col-span-5 rounded-3xl bg-slate-900/80 border border-white/10 p-6 shadow-2xl flex flex-col items-center text-center">
+        <span class="inline-flex items-center gap-1.5 rounded-full bg-amber-400/15 text-amber-300 border border-amber-400/30 px-3 py-1 text-xs font-bold mb-2">
+          📱 手機掃碼立即報到
+        </span>
+        <h1 id="lobby-theme-heading" class="text-xl sm:text-2xl font-black text-white mb-2 truncate max-w-full">UNO 派對大亂鬥</h1>
+
+        <!-- 大型房間代碼 -->
+        <div class="text-xs uppercase tracking-widest text-slate-400 font-semibold">房間代碼</div>
+        <div id="host-room-code" class="text-5xl sm:text-6xl font-black tracking-[0.22em] text-white mt-1 mb-4 font-mono">----</div>
+
+        <!-- 白底大型 QR Code -->
+        <div class="bg-white p-4 rounded-2xl shadow-xl mb-4 w-56 h-56 flex items-center justify-center">
+          <div id="qrcode-box" class="w-full h-full flex items-center justify-center"></div>
+        </div>
+
+        <!-- 加入網址與複製按鈕 -->
+        <div class="w-full bg-slate-950/80 border border-white/10 rounded-xl p-2.5 flex items-center gap-2 mb-3">
+          <input id="host-join-url" type="text" readonly class="w-full bg-transparent text-xs text-slate-300 font-mono outline-none truncate" value="產生連結中..." />
+          <button id="btn-copy-url" type="button" class="shrink-0 rounded-lg bg-indigo-500 hover:bg-indigo-400 text-white text-xs font-bold px-3 py-1.5 transition">
+            複製連結
+          </button>
+        </div>
+
+        <!-- 手動切換到手機玩家模式（方便同裝置測試或手動輸入房號加入） -->
+        <button id="btn-switch-to-join" type="button" class="text-xs text-slate-400 hover:text-amber-300 underline underline-offset-4 transition">
+          我是玩家，想手動輸入房間代碼加入 →
+        </button>
+      </div>
+
+      <!-- 右欄：已報到名單 + 自動配牌規則 + 整合式可隱藏設定中心 + 開始遊戲 -->
+      <div class="lg:col-span-7 flex flex-col gap-5">
+
+        <!-- 牌庫自動匹配面板 -->
+        <div class="rounded-3xl bg-slate-900/80 border border-white/10 p-5 shadow-xl">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h2 class="text-lg font-black text-white flex items-center gap-2">
+              🃏 自動牌庫匹配規則
+            </h2>
+            <span id="deck-tier-badge" class="rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30 px-3 py-1 text-xs font-bold">
+              等待玩家報到
+            </span>
+          </div>
+          <div class="grid grid-cols-3 gap-3 text-center">
+            <div class="rounded-2xl bg-slate-950/70 border border-white/5 p-3">
+              <div class="text-xs text-slate-400">報到人數</div>
+              <div id="stat-player-count" class="text-2xl sm:text-3xl font-black text-white mt-0.5">0 人</div>
+            </div>
+            <div class="rounded-2xl bg-slate-950/70 border border-white/5 p-3">
+              <div class="text-xs text-slate-400">自動混入牌庫</div>
+              <div id="stat-deck-count" class="text-2xl sm:text-3xl font-black text-amber-300 mt-0.5">1 副 (108張)</div>
+            </div>
+            <div class="rounded-2xl bg-slate-950/70 border border-white/5 p-3">
+              <div class="text-xs text-slate-400">每人初始手牌</div>
+              <div id="stat-hand-size" class="text-2xl sm:text-3xl font-black text-sky-300 mt-0.5">7 張</div>
+            </div>
+          </div>
+          <p class="text-xs text-slate-400 mt-3 leading-relaxed">
+            規則：2–4人用1副(發7張)｜5–8人用2副(發7張)｜9–12人用3副(發6張)｜13人以上每+4人多1副(發5張)。抽完牌庫自動重洗棄牌堆。
+          </p>
+        </div>
+
+        <!-- ==================================================================
+             整合式「派對設定中心」區塊（可一鍵隱藏 / 展開）
+             包含：主題與牌面名稱、出牌倒數、爆牌淘汰、遊戲限時與獲勝人數、音樂與音效匯入
+             ================================================================== -->
+        <div class="rounded-3xl bg-slate-900/80 border border-white/10 p-5 shadow-xl">
+          <!-- 設定區塊標題列 + 一鍵隱藏/展開鈕 -->
+          <div class="flex flex-wrap items-center justify-between gap-2">
+            <div class="min-w-0">
+              <h2 class="text-lg font-black text-white flex items-center gap-2">
+                ⚙️ 派對遊戲設定中心
+              </h2>
+              <p id="settings-summary-line" class="text-xs text-amber-300/90 mt-0.5 truncate">
+                出牌 10 秒・爆牌淘汰關閉・不限時・取前 1 名
+              </p>
+            </div>
+            <button id="btn-toggle-settings" type="button" class="shrink-0 rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/15 px-3.5 py-1.5 text-xs font-bold text-slate-100 transition">
+              隱藏設定 ▲
+            </button>
+          </div>
+
+          <!-- 可隱藏的設定主體 -->
+          <div id="settings-panel-body" class="mt-4 pt-4 border-t border-white/10 space-y-4">
+            <!-- 分類分頁標籤 -->
+            <div class="flex flex-wrap gap-2">
+              <button type="button" data-settings-tab="basic" class="settings-tab active rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-xs font-bold text-slate-300 transition">
+                🎨 主題與倒數
+              </button>
+              <button type="button" data-settings-tab="rules" class="settings-tab rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-xs font-bold text-slate-300 transition">
+                🏆 淘汰與限時規則
+              </button>
+              <button type="button" data-settings-tab="audio" class="settings-tab rounded-xl border border-white/10 bg-slate-950/70 px-3 py-1.5 text-xs font-bold text-slate-300 transition">
+                🎵 音樂與音效匯入
+              </button>
+            </div>
+
+            <!-- Tab 1: 主題名稱、牌面名稱與出牌倒數 -->
+            <div id="settings-tab-basic" class="space-y-4">
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div class="rounded-2xl bg-slate-950/60 border border-white/10 p-3.5">
+                  <label for="input-theme-name" class="block text-xs font-bold text-slate-300 mb-1.5">🏷️ 遊戲主題名稱</label>
+                  <input id="input-theme-name" type="text" maxlength="24" value="UNO 派對大亂鬥" placeholder="例如：2026 尾牙大亂鬥" class="w-full rounded-xl bg-slate-900 border border-white/15 px-3 py-2 text-sm font-bold text-white outline-none focus:border-amber-400" />
+                  <p class="text-[11px] text-slate-400 mt-1">即時同步至大廳標題與玩家手機畫面</p>
+                </div>
+                <div class="rounded-2xl bg-slate-950/60 border border-white/10 p-3.5">
+                  <label for="input-card-brand" class="block text-xs font-bold text-slate-300 mb-1.5">🃏 牌面顯示名稱</label>
+                  <input id="input-card-brand" type="text" maxlength="10" value="UNO" placeholder="例如：尾牙 / PARTY" class="w-full rounded-xl bg-slate-900 border border-white/15 px-3 py-2 text-sm font-bold text-amber-300 outline-none focus:border-amber-400" />
+                  <p class="text-[11px] text-slate-400 mt-1">印在所有牌背大字與每張牌面底部</p>
+                </div>
+              </div>
+
+              <!-- 出牌倒數 1~20 秒 -->
+              <div class="rounded-2xl bg-slate-950/60 border border-white/10 p-3.5">
+                <div class="flex items-center justify-between gap-3 mb-2">
+                  <div>
+                    <div class="text-sm font-black text-white">⏱️ 每回合出牌倒數（逾時強制出好牌、留爛牌）</div>
+                    <p class="text-[11px] text-slate-400 mt-0.5">倒數歸零自動強制打出最強好牌（+4 → 變色 → +2/跳過/迴轉 → 稀缺大點數）</p>
+                  </div>
+                  <div class="shrink-0 rounded-xl bg-amber-400/15 border border-amber-400/40 px-3 py-1.5 text-center">
+                    <span id="turn-seconds-display" class="text-xl font-black text-amber-300 font-mono">10</span>
+                    <span class="text-xs font-bold text-amber-200 ml-0.5">秒</span>
+                  </div>
+                </div>
+                <div class="flex items-center gap-3 mt-2">
+                  <span class="text-xs font-mono text-slate-400 shrink-0 whitespace-nowrap">1秒</span>
+                  <input id="turn-seconds-slider" type="range" min="1" max="20" value="10" class="w-full accent-amber-400 cursor-pointer h-2 bg-slate-700 rounded-lg" />
+                  <span class="text-xs font-mono text-slate-400 shrink-0 whitespace-nowrap">20秒</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 2: 爆牌淘汰上限、遊戲總限時、獲勝人數 -->
+            <div id="settings-tab-rules" class="hidden space-y-3.5">
+              <!-- 爆牌淘汰規則 -->
+              <div class="rounded-2xl bg-slate-950/60 border border-white/10 p-3.5">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <label class="inline-flex items-center gap-2 cursor-pointer">
+                    <input id="chk-max-hand" type="checkbox" class="w-4 h-4 accent-rose-500 rounded cursor-pointer" />
+                    <span class="text-sm font-black text-white">💥 手牌爆牌淘汰（達指定張數直接剔除算輸）</span>
+                  </label>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-slate-400">達</span>
+                    <input id="input-max-hand" type="number" min="8" max="50" value="15" class="w-16 rounded-lg bg-slate-900 border border-white/15 px-2 py-1 text-center text-sm font-black text-rose-300 outline-none focus:border-rose-400" />
+                    <span class="text-xs text-slate-400">張淘汰</span>
+                  </div>
+                </div>
+                <p class="text-[11px] text-slate-400 mt-1.5">啟用後，任何玩家手牌數達到或超過此張數將立即淘汰出局，手牌洗回牌庫。</p>
+              </div>
+
+              <!-- 遊戲總限時 + 剩餘最少牌獲勝人數 -->
+              <div class="rounded-2xl bg-slate-950/60 border border-white/10 p-3.5 space-y-3">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <label class="inline-flex items-center gap-2 cursor-pointer">
+                    <input id="chk-time-limit" type="checkbox" class="w-4 h-4 accent-emerald-400 rounded cursor-pointer" />
+                    <span class="text-sm font-black text-white">⏳ 限制遊戲總時間（時間到依手牌最少排名獲勝）</span>
+                  </label>
+                  <div class="flex items-center gap-1.5">
+                    <input id="input-time-limit-min" type="number" min="1" max="60" value="5" class="w-16 rounded-lg bg-slate-900 border border-white/15 px-2 py-1 text-center text-sm font-black text-emerald-300 outline-none focus:border-emerald-400" />
+                    <span class="text-xs text-slate-400">分鐘</span>
+                  </div>
+                </div>
+
+                <div class="flex flex-wrap items-center justify-between gap-2 pt-2.5 border-t border-white/10">
+                  <div>
+                    <div class="text-sm font-black text-white">🏆 獲勝名額人數（取手牌最少的前幾名）</div>
+                    <p class="text-[11px] text-slate-400 mt-0.5">時間到取前 N 名獲勝；若提前出完牌則鎖定名次直到湊滿 N 人</p>
+                  </div>
+                  <div class="flex items-center gap-1.5">
+                    <span class="text-xs text-slate-400">前</span>
+                    <input id="input-winner-count" type="number" min="1" max="20" value="1" class="w-16 rounded-lg bg-slate-900 border border-white/15 px-2 py-1 text-center text-sm font-black text-amber-300 outline-none focus:border-amber-400" />
+                    <span class="text-xs text-slate-400">名贏</span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Tab 3: 音樂與音效自訂匯入與音量控制 -->
+            <div id="settings-tab-audio" class="hidden space-y-3.5">
+              <!-- 背景音樂 BGM 控制與匯入 -->
+              <div class="rounded-2xl bg-slate-950/60 border border-white/10 p-3.5 space-y-2.5">
+                <div class="flex flex-wrap items-center justify-between gap-2">
+                  <div class="text-sm font-black text-white">🎵 背景音樂（BGM）</div>
+                  <div class="flex items-center gap-1.5">
+                    <button id="btn-bgm-toggle" type="button" class="rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white px-2.5 py-1 text-xs font-bold transition">▶ 播放音樂</button>
+                    <label class="rounded-lg bg-slate-800 hover:bg-slate-700 border border-white/15 text-slate-200 px-2.5 py-1 text-xs font-bold cursor-pointer transition">
+                      📂 匯入音樂
+                      <input id="file-bgm" type="file" accept="audio/*" class="hidden" />
+                    </label>
+                    <button id="btn-bgm-reset" type="button" class="rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white px-2 py-1 text-xs font-bold transition" title="恢復內建派對音樂">↺</button>
+                  </div>
+                </div>
+                <div id="bgm-source-name" class="text-[11px] text-slate-400 truncate">目前音源：內建派對輕快節奏（可匯入 MP3 / WAV / OGG）</div>
+                <div class="flex items-center gap-3">
+                  <span class="text-xs text-slate-400 shrink-0 whitespace-nowrap">BGM 音量</span>
+                  <input id="slider-bgm-vol" type="range" min="0" max="100" value="35" class="w-full accent-indigo-400 cursor-pointer h-2 bg-slate-700 rounded-lg" />
+                  <span id="val-bgm-vol" class="text-xs font-mono text-indigo-300 w-9 text-right shrink-0">35%</span>
+                </div>
+              </div>
+
+              <!-- 音效主音量與各事件音效匯入 -->
+              <div class="rounded-2xl bg-slate-950/60 border border-white/10 p-3.5 space-y-3">
+                <div class="flex items-center gap-3">
+                  <span class="text-xs font-bold text-white shrink-0 whitespace-nowrap">🔊 音效總音量</span>
+                  <input id="slider-sfx-vol" type="range" min="0" max="100" value="80" class="w-full accent-amber-400 cursor-pointer h-2 bg-slate-700 rounded-lg" />
+                  <span id="val-sfx-vol" class="text-xs font-mono text-amber-300 w-9 text-right shrink-0">80%</span>
+                </div>
+
+                <div class="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2 border-t border-white/10 text-xs" id="sfx-import-list">
+                  <!-- 由 JS 動態產生 6 種事件音效匯入列 -->
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- 已報到玩家名單 -->
+        <div class="rounded-3xl bg-slate-900/80 border border-white/10 p-5 shadow-xl">
+          <div class="flex flex-wrap items-center justify-between gap-2 mb-3">
+            <h2 class="text-lg font-black text-white">👥 已報到玩家名單</h2>
+            <div class="flex items-center gap-2">
+              <button id="btn-add-bot" type="button" class="rounded-xl bg-slate-800 hover:bg-slate-700 border border-white/10 px-3 py-1.5 text-xs font-bold text-sky-300 transition">
+                + 加入電腦玩家(測試用)
+              </button>
+              <button id="btn-start-game" type="button" disabled class="rounded-xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 disabled:from-slate-700 disabled:to-slate-700 disabled:text-slate-400 disabled:cursor-not-allowed text-slate-950 font-black px-5 py-2 text-sm shadow-lg transition">
+                🚀 開始遊戲
+              </button>
+            </div>
+          </div>
+
+          <div id="lobby-player-list" class="grid grid-cols-1 sm:grid-cols-2 gap-2.5 min-h-[84px]">
+            <div class="col-span-full rounded-2xl border border-dashed border-white/15 p-6 text-center text-sm text-slate-400">
+              尚未有玩家報到，請掃描左側 QR Code 或點擊「加入電腦玩家」體驗！
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- A-2: 房主大螢幕牌桌畫面 (遊戲進行中) -->
+    <section id="host-game" class="hidden flex flex-col gap-4">
+
+      <!-- 上方：回合資訊、方向、總遊戲倒數(如有)、單回合倒數條、大廳控制 -->
+      <div id="host-timer-box" class="rounded-3xl bg-slate-900/85 border-2 border-white/10 p-4 shadow-xl transition-all">
+        <div class="flex flex-wrap items-center justify-between gap-3 mb-2.5">
+          <div class="flex items-center gap-3 flex-wrap">
+            <span id="host-dir-badge" class="rounded-xl bg-indigo-500/20 border border-indigo-400/40 px-3 py-1.5 text-sm font-black text-indigo-200">
+              ↻ 順時針
+            </span>
+            <div>
+              <div class="text-xs text-slate-400">目前輪到</div>
+              <div id="host-current-player" class="text-xl sm:text-2xl font-black text-white">-</div>
+            </div>
+            <!-- 總遊戲限時徽章（啟用限時模式時顯示） -->
+            <div id="host-match-timer-badge" class="hidden rounded-xl bg-emerald-500/15 border border-emerald-400/40 px-3 py-1.5">
+              <div class="text-[10px] text-emerald-300 font-bold">⏳ 本局剩餘時間</div>
+              <div id="host-match-timer-text" class="text-lg font-black font-mono text-white leading-tight">05:00</div>
+            </div>
+            <!-- 規則標籤提示 -->
+            <div id="host-active-rules-pills" class="flex flex-wrap gap-1.5"></div>
+          </div>
+
+          <div class="flex items-center gap-3">
+            <div class="text-right">
+              <div class="text-xs text-slate-400">本回合剩餘</div>
+              <div id="host-timer-text" class="text-2xl sm:text-3xl font-black font-mono text-amber-300">10.0s</div>
+            </div>
+            <button id="btn-host-back-lobby" type="button" class="rounded-xl bg-slate-800 hover:bg-rose-600 border border-white/10 px-3.5 py-2 text-xs font-bold text-slate-200 transition">
+              結束本局
+            </button>
+          </div>
+        </div>
+        <!-- 倒數進度條 -->
+        <div class="w-full h-3.5 bg-slate-950 rounded-full overflow-hidden border border-white/10">
+          <div id="host-timer-bar" class="h-full bg-gradient-to-r from-emerald-400 via-amber-400 to-rose-500 transition-all duration-100" style="width: 100%"></div>
+        </div>
+
+        <!-- 即時戰況儀表板：倒數剩餘時間 / 淘汰人數 / 完成人數 / 剩餘人數 -->
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 mt-3 pt-3 border-t border-white/10">
+          <div id="host-hud-time-card" class="rounded-2xl bg-slate-950/75 border border-white/10 px-3 py-2 flex items-center justify-between gap-2 transition-all">
+            <div>
+              <div class="text-[11px] text-slate-400 font-bold">⏳ 倒數剩餘時間</div>
+              <div id="host-hud-match-time" class="text-lg sm:text-xl font-black font-mono text-emerald-300">不限時</div>
+            </div>
+            <span id="host-rush-pill" class="hidden rounded-lg bg-rose-600 text-white px-2 py-0.5 text-[10px] font-black animate-pulse shrink-0">⚡ 加速50%</span>
+          </div>
+          <div class="rounded-2xl bg-slate-950/75 border border-rose-500/20 px-3 py-2">
+            <div class="text-[11px] text-slate-400 font-bold">💥 淘汰人數</div>
+            <div id="host-hud-eliminated" class="text-lg sm:text-xl font-black text-rose-400">0 人</div>
+          </div>
+          <div class="rounded-2xl bg-slate-950/75 border border-emerald-500/20 px-3 py-2">
+            <div class="text-[11px] text-slate-400 font-bold">🏆 完成人數</div>
+            <div id="host-hud-finished" class="text-lg sm:text-xl font-black text-emerald-300">0 人</div>
+          </div>
+          <div class="rounded-2xl bg-slate-950/75 border border-sky-500/20 px-3 py-2">
+            <div class="text-[11px] text-slate-400 font-bold">🎮 剩餘人數</div>
+            <div id="host-hud-remaining" class="text-lg sm:text-xl font-black text-sky-300">0 人</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 中央：牌庫 + 棄牌堆 + 目前指定顏色 + 戰況紀錄 -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-4 items-stretch">
+
+        <!-- 牌桌中央卡牌區 -->
+        <div class="lg:col-span-7 rounded-3xl bg-slate-900/75 border border-white/10 p-6 shadow-2xl flex flex-col items-center justify-center relative overflow-hidden">
+          <div class="flex items-center justify-center gap-6 sm:gap-10">
+            <!-- 抽牌堆 -->
+            <div class="flex flex-col items-center gap-2">
+              <div class="uno-card uno-card-back w-28 h-40 sm:w-36 sm:h-52">
+                <span id="host-deck-back-brand" class="uno-card-center text-white text-xl sm:text-2xl italic tracking-tighter px-2 text-center break-all">UNO</span>
+              </div>
+              <span id="host-draw-count" class="text-xs font-bold text-slate-300 bg-slate-950/80 px-3 py-1 rounded-full border border-white/10">
+                牌庫剩餘：0 張
+              </span>
+            </div>
+
+            <!-- 棄牌堆最新一張牌 -->
+            <div class="flex flex-col items-center gap-2">
+              <div id="host-top-card-slot"></div>
+              <div id="host-active-color-pill" class="inline-flex items-center gap-1.5 text-xs font-black px-3 py-1 rounded-full border border-white/20 bg-slate-950/80">
+                <span id="host-active-color-dot" class="w-3 h-3 rounded-full bg-red-500"></span>
+                <span id="host-active-color-name">目前顏色：紅</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- 若有人沒喊 UNO，房主畫面也顯示醒目警告 -->
+          <div id="host-uno-alert" class="hidden mt-4 rounded-2xl bg-rose-500/20 border border-rose-400/50 px-4 py-2 text-sm font-black text-rose-200 animate-bounce"></div>
+        </div>
+
+        <!-- 右側：即時事件戰報 -->
+        <div class="lg:col-span-5 rounded-3xl bg-slate-900/75 border border-white/10 p-5 shadow-xl flex flex-col">
+          <div class="flex items-center justify-between mb-3">
+            <h3 class="text-sm font-black text-slate-200">📢 即時派對戰報</h3>
+            <span id="host-deck-meta" class="text-xs text-slate-400">1 副牌</span>
+          </div>
+          <div id="host-event-log" class="flex-1 space-y-2 max-h-60 overflow-y-auto pr-1 text-xs sm:text-sm"></div>
+        </div>
+      </div>
+
+      <!-- 下方：所有玩家座位卡片 (含剩餘張數、UNO狀態、淘汰/完賽狀態、離線踢除) -->
+      <div class="rounded-3xl bg-slate-900/75 border border-white/10 p-5 shadow-xl">
+        <h3 class="text-sm font-black text-slate-300 mb-3">座位順序與手牌張數（離線玩家可由房主踢除避免卡局）</h3>
+        <div id="host-players-grid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ========================================================================
+       模式 B：手機玩家模式 (偵測到 ?room=XXXX 或手動切換加入)
+       ======================================================================== -->
+  <main id="player-root" class="hidden w-full max-w-md mx-auto px-3 py-3 flex flex-col" style="min-height: calc(100dvh - 58px);">
+
+    <!-- B-1: 玩家輸入暱稱報到畫面 -->
+    <section id="player-join-screen" class="my-auto rounded-3xl bg-slate-900/90 border border-white/10 p-6 shadow-2xl">
+      <div class="text-center mb-5">
+        <div id="player-join-badge" class="inline-flex items-center justify-center min-w-[56px] h-14 px-2 rounded-2xl bg-gradient-to-br from-red-500 via-amber-400 to-blue-500 font-black text-slate-950 text-lg shadow-lg mb-3">UNO</div>
+        <h1 id="player-join-title" class="text-2xl font-black text-white">加入 UNO 派對房間</h1>
+        <p class="text-xs text-slate-400 mt-1">輸入暱稱即可報到，開局後手機只顯示你的手牌</p>
+      </div>
+
+      <div class="space-y-4">
+        <div>
+          <label for="input-room-code" class="block text-xs font-bold text-slate-300 mb-1.5">房間代碼 (4 碼)</label>
+          <input id="input-room-code" type="text" maxlength="6" placeholder="例如：ABCD" class="w-full rounded-2xl bg-slate-950 border border-white/15 px-4 py-3 text-center text-2xl font-black tracking-[0.25em] uppercase text-amber-300 outline-none focus:border-amber-400" />
+        </div>
+
+        <div>
+          <label for="input-nickname" class="block text-xs font-bold text-slate-300 mb-1.5">你的派對暱稱</label>
+          <input id="input-nickname" type="text" maxlength="12" placeholder="輸入暱稱（例如：小明）" class="w-full rounded-2xl bg-slate-950 border border-white/15 px-4 py-3 text-base font-bold text-white outline-none focus:border-amber-400" />
+        </div>
+
+        <button id="btn-player-join" type="button" class="w-full rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 hover:from-amber-300 hover:to-orange-400 active:scale-[0.98] text-slate-950 font-black py-3.5 text-lg shadow-xl transition">
+          ✋ 立即報到加入
+        </button>
+
+        <div id="player-join-status" class="text-center text-xs text-slate-400 min-h-[18px]"></div>
+
+        <div class="text-center pt-2 border-t border-white/10">
+          <button id="btn-back-to-host" type="button" class="text-xs text-slate-400 hover:text-white underline underline-offset-4">
+            我要開新房間當房主 →
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- B-2: 玩家等待開局畫面 -->
+    <section id="player-waiting-screen" class="hidden my-auto rounded-3xl bg-slate-900/90 border border-white/10 p-6 text-center shadow-2xl">
+      <div class="text-4xl mb-3">🎉</div>
+      <h2 id="player-waiting-theme" class="text-xl font-black text-white">報到成功！等待房主開局</h2>
+      <p id="player-waiting-name" class="text-sm text-amber-300 font-bold mt-1">-</p>
+      <div class="mt-4 rounded-2xl bg-slate-950/80 border border-white/10 p-4 text-xs text-slate-300 space-y-1.5">
+        <div>房間代碼：<span id="player-waiting-room" class="font-mono font-black text-white">----</span></div>
+        <div>目前報到人數：<span id="player-waiting-count" class="font-black text-emerald-300">1 人</span></div>
+        <div>出牌倒數設定：<span id="player-waiting-timer" class="font-black text-amber-300">10 秒</span></div>
+        <div id="player-waiting-rules" class="text-[11px] text-sky-300 pt-1 border-t border-white/10"></div>
+      </div>
+      <p class="text-[11px] text-slate-400 mt-4">若不小心跳出或休眠，重新開啟此連結即可自動斷線重連。</p>
+    </section>
+
+    <!-- B-3: 手機玩家進行中介面 (單手直向優化，只看得到自己的牌) -->
+    <section id="player-game-screen" class="hidden flex-1 flex flex-col justify-between gap-3">
+
+      <!-- 頂部：輪到誰 + 總時間(如有) + 倒數進度條 -->
+      <div id="player-timer-box" class="rounded-2xl bg-slate-900/90 border-2 border-white/10 p-3 shadow-lg transition-all">
+        <div class="flex items-center justify-between gap-2 mb-1.5">
+          <div class="min-w-0">
+            <div id="player-turn-label" class="text-sm font-black text-white truncate">等待中...</div>
+            <div id="player-dir-label" class="text-[11px] text-slate-400">↻ 順時針｜牌庫剩餘 0 張</div>
+          </div>
+          <div class="text-right shrink-0">
+            <div id="player-match-timer-badge" class="hidden text-[11px] font-mono font-black text-emerald-300">⏳ 05:00</div>
+            <div id="player-timer-text" class="text-2xl font-black font-mono text-amber-300 leading-none">10.0s</div>
+          </div>
+        </div>
+        <div class="w-full h-2.5 bg-slate-950 rounded-full overflow-hidden">
+          <div id="player-timer-bar" class="h-full bg-gradient-to-r from-emerald-400 via-amber-400 to-rose-500 transition-all duration-100" style="width: 100%"></div>
+        </div>
+        <!-- 手機端精簡即時戰況列 -->
+        <div class="grid grid-cols-4 gap-1.5 mt-2 pt-2 border-t border-white/10 text-center">
+          <div class="rounded-lg bg-slate-950/75 py-1 px-1">
+            <div class="text-[9px] text-slate-400">剩餘時間</div>
+            <div id="player-hud-match-time" class="text-xs font-black font-mono text-emerald-300">不限時</div>
+          </div>
+          <div class="rounded-lg bg-slate-950/75 py-1 px-1">
+            <div class="text-[9px] text-slate-400">淘汰</div>
+            <div id="player-hud-eliminated" class="text-xs font-black text-rose-400">0 人</div>
+          </div>
+          <div class="rounded-lg bg-slate-950/75 py-1 px-1">
+            <div class="text-[9px] text-slate-400">完成</div>
+            <div id="player-hud-finished" class="text-xs font-black text-emerald-300">0 人</div>
+          </div>
+          <div class="rounded-lg bg-slate-950/75 py-1 px-1">
+            <div class="text-[9px] text-slate-400">剩餘</div>
+            <div id="player-hud-remaining" class="text-xs font-black text-sky-300">0 人</div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 剩餘時間 10% 加速 50% 警示列 -->
+      <div id="player-rush-banner" class="hidden rounded-xl bg-rose-600/90 border border-rose-300 px-3 py-1.5 text-center text-xs font-black text-white animate-pulse">
+        ⚡ 最後 10% 時間！全場出牌速度加快 50%！
+      </div>
+
+      <!-- 若自己已被爆牌淘汰或已提前完賽的狀態提示條 -->
+      <div id="player-status-banner" class="hidden rounded-2xl border-2 px-4 py-3 text-center text-sm font-black shadow-lg"></div>
+
+      <!-- 中央：場上最新一張牌 + 抓沒喊 UNO 警示按鈕 -->
+      <div class="flex-1 flex flex-col items-center justify-center gap-2.5 py-1">
+        <div id="player-top-card-slot"></div>
+        <div id="player-color-pill" class="inline-flex items-center gap-1.5 rounded-full bg-slate-900/90 border border-white/15 px-3.5 py-1 text-xs font-black">
+          <span id="player-color-dot" class="w-3 h-3 rounded-full bg-red-500"></span>
+          <span id="player-color-name">目前顏色：紅</span>
+        </div>
+
+        <!-- 抓沒喊 UNO 動態按鈕 (當有人剩 1 張且未喊 UNO 時自動顯示) -->
+        <button id="btn-catch-uno" type="button" class="hidden w-full rounded-2xl bg-rose-600 hover:bg-rose-500 active:scale-95 border-2 border-rose-300 py-2.5 px-4 text-sm font-black text-white shadow-xl animate-pulse">
+          🚨 抓沒喊 UNO！(罰抽 2 張)
+        </button>
+      </div>
+
+      <!-- 大型防誤觸操作按鈕列 (抽牌 + 喊 UNO) -->
+      <div class="grid grid-cols-2 gap-3">
+        <button id="btn-player-draw" type="button" class="rounded-2xl bg-indigo-600 hover:bg-indigo-500 active:scale-95 disabled:bg-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed py-3.5 text-base font-black text-white shadow-lg border border-white/15 transition">
+          🃏 抽一張牌
+        </button>
+        <button id="btn-player-uno" type="button" class="rounded-2xl bg-gradient-to-r from-rose-500 to-amber-500 hover:from-rose-400 hover:to-amber-400 active:scale-95 disabled:from-slate-800 disabled:to-slate-800 disabled:text-slate-500 disabled:cursor-not-allowed py-3.5 text-base font-black text-white shadow-lg border border-white/15 transition">
+          📣 喊 UNO!
+        </button>
+      </div>
+
+      <!-- 底部：自己的手牌橫向滑動區 -->
+      <div class="rounded-3xl bg-slate-900/85 border border-white/10 pt-3 pb-3 px-2 shadow-2xl">
+        <div class="flex items-center justify-between px-2 mb-1.5">
+          <span class="text-xs font-bold text-slate-300">我的手牌 (<span id="player-hand-count">0</span> 張<span id="player-max-hand-hint" class="text-rose-300"></span>)</span>
+          <span id="player-hand-hint" class="text-[11px] text-amber-300 font-semibold">點擊亮起的牌即可出牌</span>
+        </div>
+        <div id="player-hand-list" class="hand-scroll flex items-end gap-2.5 overflow-x-auto px-2 pt-4 pb-2 snap-x"></div>
+      </div>
+    </section>
+  </main>
+
+  <!-- ========================================================================
+       萬用牌選色彈窗 (Wild / +4 出牌時使用)
+       ======================================================================== -->
+  <div id="color-modal" class="hidden fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-xs rounded-3xl bg-slate-900 border border-white/15 p-5 shadow-2xl text-center">
+      <h3 class="text-lg font-black text-white mb-1">🎨 選擇指定顏色</h3>
+      <p class="text-xs text-slate-400 mb-4">請選擇下一位玩家必須跟隨的顏色</p>
+      <div class="grid grid-cols-2 gap-3">
+        <button type="button" data-pick-color="red"    class="rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 py-5 text-lg font-black text-white shadow-lg transition">紅色</button>
+        <button type="button" data-pick-color="yellow" class="rounded-2xl bg-yellow-400 hover:bg-yellow-300 active:scale-95 py-5 text-lg font-black text-slate-950 shadow-lg transition">黃色</button>
+        <button type="button" data-pick-color="green"  class="rounded-2xl bg-green-500 hover:bg-green-400 active:scale-95 py-5 text-lg font-black text-white shadow-lg transition">綠色</button>
+        <button type="button" data-pick-color="blue"   class="rounded-2xl bg-blue-500 hover:bg-blue-400 active:scale-95 py-5 text-lg font-black text-white shadow-lg transition">藍色</button>
+      </div>
+      <button id="btn-cancel-color" type="button" class="mt-4 text-xs text-slate-400 hover:text-white underline">取消出牌</button>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       勝利結算彈窗 (房主與玩家共用，支援多位贏家與爆牌淘汰標示)
+       ======================================================================== -->
+  <div id="winner-modal" class="hidden fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="w-full max-w-md rounded-3xl bg-slate-900 border-2 border-amber-400/50 p-6 shadow-2xl text-center">
+      <div class="text-5xl mb-2">🏆</div>
+      <h2 id="winner-modal-title" class="text-2xl font-black text-amber-300">派對大贏家！</h2>
+      <div id="winner-name" class="text-2xl sm:text-3xl font-black text-white mt-2 mb-1">-</div>
+      <div id="winner-reason" class="text-xs text-slate-400 mb-4"></div>
+      <div id="winner-ranking" class="rounded-2xl bg-slate-950/80 border border-white/10 p-3 text-left text-xs sm:text-sm space-y-1.5 max-h-56 overflow-y-auto mb-5"></div>
+      <div class="flex gap-3 justify-center">
+        <button id="btn-play-again" type="button" class="hidden flex-1 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-500 hover:from-emerald-400 hover:to-teal-400 text-slate-950 font-black py-3 text-base shadow-lg transition">
+          🔄 再來一局（回大廳）
+        </button>
+        <button id="btn-close-winner" type="button" class="rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-200 font-bold py-3 px-5 text-sm transition">
+          關閉
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    /* ========================================================================
+       UNO 派對大亂鬥 — 純前端 WebRTC (PeerJS) 完整核心邏輯
+       架構：星狀拓撲（房主為權威伺服器 Host，手機端為瘦客戶端 Client）
+       ======================================================================== */
+
+    // ---------------- 1. 基礎常數與工具函式 ----------------
+    const COLORS = ['red', 'yellow', 'green', 'blue'];
+    const COLOR_META = {
+      red:    { name: '紅色', dot: 'bg-red-500',    text: 'text-red-300' },
+      yellow: { name: '黃色', dot: 'bg-yellow-400', text: 'text-yellow-300' },
+      green:  { name: '綠色', dot: 'bg-green-500',  text: 'text-green-300' },
+      blue:   { name: '藍色', dot: 'bg-blue-500',   text: 'text-blue-300' },
+      wild:   { name: '萬用', dot: 'bg-purple-500', text: 'text-purple-300' }
+    };
+    const AVATAR_COLORS = ['#ef4444', '#f59e0b', '#10b981', '#3b82f6', '#8b5cf6', '#ec4899', '#14b8a6', '#f97316'];
+    const PEER_PREFIX = 'uno-party-tw-'; // 避免與公共 PeerJS 伺服器上的其他應用撞名
+
+    const $ = (id) => document.getElementById(id);
+
+    // 安全讀寫 localStorage (避免沙盒或無痕模式拋錯)
+    const safeStorage = {
+      get(key, fallback = '') {
+        try { return localStorage.getItem(key) || fallback; } catch { return fallback; }
+      },
+      set(key, val) {
+        try { localStorage.setItem(key, val); } catch { /* 忽略儲存錯誤 */ }
+      }
+    };
+
+    // 產生 4 位數房間代碼（去除易混淆字元 0/O/1/I/L）
+    function generateRoomCode() {
+      const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+      let code = '';
+      for (let i = 0; i < 4; i++) {
+        code += chars[Math.floor(Math.random() * chars.length)];
+      }
+      return code;
+    }
+
+    // 產生唯一識別 ID
+    function uid(prefix = 'id') {
+      return `${prefix}_${Math.random().toString(36).slice(2, 9)}_${Date.now().toString(36)}`;
+    }
+
+    // Fisher-Yates 洗牌演算法
+    function shuffle(arr) {
+      const a = [...arr];
+      for (let i = a.length - 1; i > 0; i--) {
+        const j = Math.floor(Math.random() * (i + 1));
+        [a[i], a[j]] = [a[j], a[i]];
+      }
+      return a;
+    }
+
+    // 格式化 MM:SS 倒數文字
+    function formatMMSS(ms) {
+      const totalSec = Math.max(0, Math.ceil(ms / 1000));
+      const m = Math.floor(totalSec / 60);
+      const s = totalSec % 60;
+      return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+    }
+
+    // 依報到人數自動計算牌庫副數、總牌數與初始手牌數
+    function calcDeckConfig(playerCount) {
+      const n = Math.max(0, playerCount);
+      if (n <= 4)  return { decks: 1, totalCards: 108, handSize: 7, label: '2–4 人標準模式' };
+      if (n <= 8)  return { decks: 2, totalCards: 216, handSize: 7, label: '5–8 人雙副派對模式' };
+      if (n <= 12) return { decks: 3, totalCards: 324, handSize: 6, label: '9–12 人三副快節奏模式' };
+      const decks = Math.ceil(n / 4);
+      return { decks, totalCards: decks * 108, handSize: 5, label: `${n} 人超大亂鬥模式` };
+    }
+
+    // 建立 N 副標準 108 張 UNO 牌庫
+    function buildDeck(deckCount) {
+      const deck = [];
+      let seq = 1;
+      for (let d = 0; d < deckCount; d++) {
+        for (const color of COLORS) {
+          // 數字 0 每色 1 張
+          deck.push({ id: `c${seq++}`, color, value: '0', type: 'number', points: 0 });
+          // 數字 1~9 每色各 2 張
+          for (let num = 1; num <= 9; num++) {
+            deck.push({ id: `c${seq++}`, color, value: String(num), type: 'number', points: num });
+            deck.push({ id: `c${seq++}`, color, value: String(num), type: 'number', points: num });
+          }
+          // 功能牌 (跳過、迴轉、+2) 每色各 2 張
+          for (const action of ['skip', 'reverse', 'draw2']) {
+            deck.push({ id: `c${seq++}`, color, value: action, type: 'action', points: 20 });
+            deck.push({ id: `c${seq++}`, color, value: action, type: 'action', points: 20 });
+          }
+        }
+        // 萬用變色 4 張、萬用加四 4 張
+        for (let w = 0; w < 4; w++) {
+          deck.push({ id: `c${seq++}`, color: 'wild', value: 'wild', type: 'wild', points: 50 });
+          deck.push({ id: `c${seq++}`, color: 'wild', value: 'wild4', type: 'wild', points: 50 });
+        }
+      }
+      return shuffle(deck);
+    }
+
+    // 取得卡牌顯示文字與符號
+    function getCardSymbol(card) {
+      switch (card.value) {
+        case 'skip':    return '⊘';
+        case 'reverse': return '⇄';
+        case 'draw2':   return '+2';
+        case 'wild':    return 'W';
+        case 'wild4':   return '+4';
+        default:        return card.value;
+      }
+    }
+
+    // 取得卡牌中文名稱 (用於派對事件廣播)
+    function getCardLabel(card) {
+      const cName = card.color === 'wild' ? '' : COLOR_META[card.color].name;
+      switch (card.value) {
+        case 'skip':    return `${cName}跳過`;
+        case 'reverse': return `${cName}迴轉`;
+        case 'draw2':   return `${cName} +2`;
+        case 'wild':    return '萬用變色牌';
+        case 'wild4':   return '+4 萬用加四';
+        default:        return `${cName} ${card.value}`;
+      }
+    }
+
+    // 計算手牌總點數（用於限時結束同張數時的決勝順序）
+    function sumHandPoints(hand) {
+      return hand.reduce((acc, c) => acc + (c.points || 0), 0);
+    }
+
+    // 渲染一張經典 UNO 卡牌 HTML（含自訂牌面名稱）
+    function renderCardHTML(card, sizeClass = 'w-28 h-40 sm:w-36 sm:h-52', extraClass = '', dataAttr = '', cardBrand = 'UNO') {
+      const sym = getCardSymbol(card);
+      const isWild = card.color === 'wild';
+      const cornerSize = sizeClass.includes('hand-card') ? 'text-sm' : 'text-lg sm:text-xl';
+      const centerSize = sizeClass.includes('hand-card') ? 'text-3xl' : 'text-5xl sm:text-6xl';
+      const safeBrand = escapeHTML((cardBrand || 'UNO').trim() || 'UNO');
+
+      const centerContent = isWild
+        ? `<div class="wild-emblem"><span class="text-white font-black ${sizeClass.includes('hand-card') ? 'text-xl' : 'text-2xl sm:text-3xl'} drop-shadow">${sym}</span></div>`
+        : `<span class="uno-card-center text-white ${centerSize}">${sym}</span>`;
+
+      return `
+        <div class="uno-card color-${card.color} ${sizeClass} ${extraClass}" ${dataAttr}>
+          <span class="uno-card-corner tl text-white ${cornerSize}">${sym}</span>
+          ${centerContent}
+          <span class="uno-card-brand">${safeBrand}</span>
+          <span class="uno-card-corner br text-white ${cornerSize}">${sym}</span>
+        </div>
+      `;
+    }
+
+    // 判斷一張牌在目前場面上是否合法可出
+    function isCardPlayable(card, topCard, activeColor) {
+      if (!card || !topCard) return false;
+      if (card.color === 'wild') return true;
+      if (card.color === activeColor) return true;
+      if (card.value === topCard.value) return true;
+      return false;
+    }
+
+    // ---------------- 2. 進階音訊系統 (BGM + 自訂音效匯入 + 獨立音量) ----------------
+    const SFX_DEFS = [
+      { key: 'playCard',    label: '出牌音效' },
+      { key: 'drawCard',    label: '抽牌音效' },
+      { key: 'tickUrgent',  label: '倒數 3 秒警示' },
+      { key: 'timeoutWarn', label: '逾時 / 抓包 / 爆牌' },
+      { key: 'unoShout',    label: '喊 UNO 歡呼' },
+      { key: 'winFanfare',  label: '勝利慶祝' }
+    ];
+
+    const soundEngine = {
+      ctx: null,
+      muted: false,
+      sfxVolume: 0.8,      // 0.0 ~ 1.0
+      bgmVolume: 0.35,     // 0.0 ~ 1.0
+      bgmPlaying: false,
+      bgmAudio: null,      // 自訂匯入的 BGM Audio 物件
+      bgmFileName: '',
+      synthBgmTimer: null, // 內建 Web Audio 派對循環節奏
+      synthStep: 0,
+      customSfx: {},       // key -> { url, name }
+
+      unlock() {
+        if (!this.ctx) {
+          const AudioCtx = window.AudioContext || window.webkitAudioContext;
+          if (AudioCtx) this.ctx = new AudioCtx();
+        }
+        if (this.ctx && this.ctx.state === 'suspended') {
+          this.ctx.resume().catch(() => {});
+        }
+      },
+
+      setSfxVolume(v) {
+        this.sfxVolume = Math.max(0, Math.min(1, v));
+      },
+
+      setBgmVolume(v) {
+        this.bgmVolume = Math.max(0, Math.min(1, v));
+        if (this.bgmAudio) {
+          this.bgmAudio.volume = this.muted ? 0 : this.bgmVolume;
+        }
+      },
+
+      setMuted(m) {
+        this.muted = m;
+        if (this.bgmAudio) {
+          this.bgmAudio.volume = this.muted ? 0 : this.bgmVolume;
+        }
+      },
+
+      // 匯入自訂背景音樂
+      importBgm(file) {
+        if (!file) return;
+        if (this.bgmAudio) {
+          this.bgmAudio.pause();
+          if (this.bgmAudio._blobUrl) URL.revokeObjectURL(this.bgmAudio._blobUrl);
+        }
+        const url = URL.createObjectURL(file);
+        const audio = new Audio(url);
+        audio.loop = true;
+        audio.volume = this.muted ? 0 : this.bgmVolume;
+        audio._blobUrl = url;
+        this.bgmAudio = audio;
+        this.bgmFileName = file.name;
+        this.stopSynthBgm();
+        if (this.bgmPlaying) {
+          audio.play().catch(() => {});
+        }
+        $('bgm-source-name').textContent = `目前音源：${file.name}`;
+        showToast(`已匯入背景音樂：${file.name}`, 'success');
+      },
+
+      resetBgm() {
+        if (this.bgmAudio) {
+          this.bgmAudio.pause();
+          if (this.bgmAudio._blobUrl) URL.revokeObjectURL(this.bgmAudio._blobUrl);
+          this.bgmAudio = null;
+        }
+        this.bgmFileName = '';
+        $('bgm-source-name').textContent = '目前音源：內建派對輕快節奏（可匯入 MP3 / WAV / OGG）';
+        if (this.bgmPlaying) {
+          this.startSynthBgm();
+        }
+        showToast('已恢復內建背景音樂', 'info');
+      },
+
+      toggleBgm() {
+        this.unlock();
+        this.bgmPlaying = !this.bgmPlaying;
+        if (this.bgmPlaying) {
+          if (this.bgmAudio) {
+            this.bgmAudio.volume = this.muted ? 0 : this.bgmVolume;
+            this.bgmAudio.play().catch(() => {});
+          } else {
+            this.startSynthBgm();
+          }
+        } else {
+          if (this.bgmAudio) this.bgmAudio.pause();
+          this.stopSynthBgm();
+        }
+        this.updateBgmButtons();
+      },
+
+      updateBgmButtons() {
+        const quick = $('btn-bgm-quick');
+        const toggle = $('btn-bgm-toggle');
+        if (quick) quick.textContent = this.bgmPlaying ? '🎵 音樂開' : '🎵 音樂關';
+        if (toggle) toggle.textContent = this.bgmPlaying ? '⏸ 暫停音樂' : '▶ 播放音樂';
+      },
+
+      bgmSpeedRate: 1.0,
+      setBgmSpeed(rate = 1.0) {
+        this.bgmSpeedRate = rate;
+        if (this.bgmAudio) {
+          try { this.bgmAudio.playbackRate = rate; } catch {}
+        }
+        if (this.bgmPlaying && !this.bgmAudio) {
+          this.startSynthBgm();
+        }
+      },
+
+      // 內建輕快派對合成節奏循環
+      startSynthBgm() {
+        this.stopSynthBgm();
+        const bassLine = [261.6, 329.6, 392.0, 329.6, 293.7, 349.2, 440.0, 349.2];
+        const stepMs = Math.max(120, Math.round(320 / (this.bgmSpeedRate || 1)));
+        this.synthBgmTimer = setInterval(() => {
+          if (!this.bgmPlaying || this.muted || this.bgmVolume <= 0.01) return;
+          const freq = bassLine[this.synthStep % bassLine.length];
+          this.synthStep++;
+          this.rawTone(freq, 0.18, 'triangle', 0.14 * this.bgmVolume, 0);
+        }, stepMs);
+      },
+
+      stopSynthBgm() {
+        clearInterval(this.synthBgmTimer);
+        this.synthBgmTimer = null;
+      },
+
+      // 匯入單一事件自訂音效
+      importSfx(key, file) {
+        if (!file) return;
+        if (this.customSfx[key]?.url) {
+          URL.revokeObjectURL(this.customSfx[key].url);
+        }
+        this.customSfx[key] = {
+          url: URL.createObjectURL(file),
+          name: file.name
+        };
+        renderSfxImportRows();
+        showToast(`已更新音效：${file.name}`, 'success');
+      },
+
+      resetSfx(key) {
+        if (this.customSfx[key]?.url) {
+          URL.revokeObjectURL(this.customSfx[key].url);
+        }
+        delete this.customSfx[key];
+        renderSfxImportRows();
+        showToast('已恢復內建合成音效', 'info');
+      },
+
+      // 播放底層 Web Audio 波形
+      rawTone(freq, duration = 0.12, type = 'sine', gainVal = 0.12, delay = 0) {
+        if (this.muted || gainVal <= 0.001) return;
+        this.unlock();
+        if (!this.ctx) return;
+        const now = this.ctx.currentTime + delay;
+        const osc = this.ctx.createOscillator();
+        const gain = this.ctx.createGain();
+        osc.type = type;
+        osc.frequency.setValueAtTime(freq, now);
+        gain.gain.setValueAtTime(gainVal, now);
+        gain.gain.exponentialRampToValueAtTime(0.001, now + duration);
+        osc.connect(gain);
+        gain.connect(this.ctx.destination);
+        osc.start(now);
+        osc.stop(now + duration);
+      },
+
+      tone(freq, duration = 0.12, type = 'sine', baseGain = 0.15, delay = 0) {
+        this.rawTone(freq, duration, type, baseGain * this.sfxVolume, delay);
+      },
+
+      // 優先播放使用者匯入的自訂音效，無則回退內建合成音效
+      playEvent(key, fallbackFn) {
+        if (this.muted || this.sfxVolume <= 0.001) return;
+        const custom = this.customSfx[key];
+        if (custom && custom.url) {
+          try {
+            const a = new Audio(custom.url);
+            a.volume = this.sfxVolume;
+            a.play().catch(() => {});
+            return;
+          } catch {}
+        }
+        fallbackFn();
+      },
+
+      playCard()    { this.playEvent('playCard',    () => { this.tone(520, 0.08, 'triangle', 0.16); this.tone(740, 0.1, 'sine', 0.12, 0.05); }); },
+      drawCard()    { this.playEvent('drawCard',    () => { this.tone(300, 0.09, 'sine', 0.14); }); },
+      tickUrgent()  { this.playEvent('tickUrgent',  () => { this.tone(880, 0.07, 'square', 0.1); }); },
+      timeoutWarn() { this.playEvent('timeoutWarn', () => { this.tone(440, 0.15, 'sawtooth', 0.14); this.tone(330, 0.25, 'sawtooth', 0.14, 0.14); }); },
+      unoShout()    { this.playEvent('unoShout',    () => { this.tone(587, 0.12, 'triangle', 0.18); this.tone(880, 0.22, 'triangle', 0.2, 0.1); }); },
+      winFanfare()  { this.playEvent('winFanfare',  () => { [523, 659, 784, 1046].forEach((f, i) => this.tone(f, 0.22, 'triangle', 0.18, i * 0.11)); }); }
+    };
+
+    // 渲染 6 個音效匯入列
+    function renderSfxImportRows() {
+      const box = $('sfx-import-list');
+      if (!box) return;
+      box.innerHTML = SFX_DEFS.map(def => {
+        const custom = soundEngine.customSfx[def.key];
+        const statusText = custom ? escapeHTML(custom.name) : '內建音效';
+        return `
+          <div class="flex items-center justify-between gap-2 rounded-xl bg-slate-900/90 border border-white/10 px-2.5 py-2">
+            <div class="min-w-0">
+              <div class="font-bold text-slate-200 truncate">${def.label}</div>
+              <div class="text-[10px] ${custom ? 'text-emerald-300' : 'text-slate-500'} truncate">${statusText}</div>
+            </div>
+            <div class="flex items-center gap-1 shrink-0">
+              <button type="button" data-sfx-test="${def.key}" class="rounded-lg bg-slate-800 hover:bg-indigo-600 text-slate-200 px-2 py-1 text-[10px] font-bold transition" title="試聽">▶</button>
+              <label class="rounded-lg bg-slate-800 hover:bg-amber-500 hover:text-slate-950 text-slate-200 px-2 py-1 text-[10px] font-bold cursor-pointer transition">
+                匯入
+                <input type="file" accept="audio/*" data-sfx-file="${def.key}" class="hidden" />
+              </label>
+              ${custom ? `<button type="button" data-sfx-reset="${def.key}" class="rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white px-1.5 py-1 text-[10px] font-bold transition" title="恢復預設">↺</button>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 全域點擊解鎖音效
+    document.addEventListener('pointerdown', () => soundEngine.unlock(), { once: true });
+
+    // 吐司訊息與派對大型橫幅
+    function showToast(msg, type = 'info') {
+      const el = document.createElement('div');
+      const colors = {
+        info: 'bg-slate-900/95 border-white/15 text-slate-100',
+        success: 'bg-emerald-900/95 border-emerald-400/50 text-emerald-100',
+        warn: 'bg-amber-900/95 border-amber-400/50 text-amber-100',
+        error: 'bg-rose-900/95 border-rose-400/50 text-rose-100'
+      };
+      el.className = `rounded-xl border px-4 py-2.5 text-center text-xs sm:text-sm font-bold shadow-xl backdrop-blur ${colors[type] || colors.info}`;
+      el.textContent = msg;
+      $('toast-container').appendChild(el);
+      setTimeout(() => el.remove(), 3000);
+    }
+
+    let bannerTimer = null;
+    function showPartyBanner(text, isTimeout = false) {
+      const wrap = $('party-banner');
+      const inner = $('party-banner-inner');
+      const txt = $('party-banner-text');
+      txt.textContent = text;
+      inner.className = isTimeout
+        ? 'rounded-2xl border-2 border-rose-400 bg-rose-950/95 px-5 py-3.5 text-center shadow-2xl backdrop-blur'
+        : 'rounded-2xl border-2 border-amber-300 bg-slate-900/95 px-5 py-3.5 text-center shadow-2xl backdrop-blur';
+      txt.className = isTimeout
+        ? 'text-base sm:text-xl font-black tracking-wide text-rose-200'
+        : 'text-base sm:text-xl font-black tracking-wide text-amber-300';
+      wrap.classList.remove('hidden', 'party-banner-anim');
+      void wrap.offsetWidth; // 觸發重繪以重播動畫
+      wrap.classList.add('party-banner-anim');
+      clearTimeout(bannerTimer);
+      bannerTimer = setTimeout(() => wrap.classList.add('hidden'), 4300);
+    }
+
+    function setConnBadge(status, text) {
+      const dot = $('conn-dot');
+      const map = {
+        ok: 'bg-emerald-400',
+        warn: 'bg-amber-400 animate-pulse',
+        err: 'bg-rose-500'
+      };
+      dot.className = `w-2 h-2 rounded-full ${map[status] || map.warn}`;
+      $('conn-text').textContent = text;
+    }
+
+    // 套用主題名稱與牌面名稱到畫面各處
+    function applyThemeBranding(themeName, cardBrand) {
+      const safeTheme = (themeName || 'UNO 派對大亂鬥').trim() || 'UNO 派對大亂鬥';
+      const safeBrand = (cardBrand || 'UNO').trim() || 'UNO';
+      document.title = `${safeTheme} — 線上多人掃碼即玩`;
+      $('header-title').textContent = safeTheme;
+      $('header-card-badge').textContent = safeBrand.slice(0, 4);
+      const lobbyH = $('lobby-theme-heading');
+      if (lobbyH) lobbyH.textContent = safeTheme;
+      const deckBack = $('host-deck-back-brand');
+      if (deckBack) deckBack.textContent = safeBrand;
+      const joinBadge = $('player-join-badge');
+      if (joinBadge) joinBadge.textContent = safeBrand.slice(0, 5);
+      const joinTitle = $('player-join-title');
+      if (joinTitle) joinTitle.textContent = `加入 ${safeTheme}`;
+    }
+
+    // ========================================================================
+    // 3. 房主核心系統 (Host Controller — 權威遊戲引擎)
+    // ========================================================================
+    const hostState = {
+      roomCode: '',
+      peer: null,
+      connections: new Map(), // clientId -> PeerJS DataConnection
+      players: [],            // { id, name, color, isBot, connected, hand: [], calledUno: false, eliminated: false, finishedRank: 0 }
+      phase: 'lobby',         // 'lobby' | 'playing' | 'ended'
+      // ---- 可自訂派對設定 ----
+      themeName: 'UNO 派對大亂鬥',
+      cardBrand: 'UNO',
+      turnSeconds: 10,        // 出牌倒數秒數 (1~20)
+      enableMaxHand: false,   // 是否啟用爆牌淘汰
+      maxHandLimit: 15,       // 手牌達此張數直接淘汰算輸
+      enableTimeLimit: false, // 是否啟用遊戲總限時
+      timeLimitMinutes: 5,    // 限時分鐘數
+      winnerCount: 1,         // 獲勝人數（取剩餘牌最少的前 N 名）
+      settingsCollapsed: false,
+      // ---- 牌局即時狀態 ----
+      deck: [],
+      discard: [],
+      activeColor: 'red',
+      direction: 1,           // 1: 順時針, -1: 逆時針
+      currentIndex: 0,
+      turnDeadline: 0,
+      matchDeadline: 0,
+      matchTotalMs: 0,
+      rushTriggered: false,
+      timerInterval: null,
+      lastUrgentSec: -1,
+      botTimer: null,
+      logs: [],
+      finishedWinners: [],    // 提前清空手牌鎖定勝出的玩家 ID 順序
+      eliminatedOrder: [],    // 爆牌淘汰的玩家 ID 順序
+      deckConfig: calcDeckConfig(0)
+    };
+
+    // 更新設定中心收合摘要列
+    function updateSettingsSummary() {
+      const parts = [
+        `出牌 ${hostState.turnSeconds} 秒`,
+        hostState.enableMaxHand ? `爆牌滿 ${hostState.maxHandLimit} 張淘汰` : '爆牌淘汰關閉',
+        hostState.enableTimeLimit ? `限時 ${hostState.timeLimitMinutes} 分鐘` : '不限時',
+        `取前 ${hostState.winnerCount} 名贏`
+      ];
+      $('settings-summary-line').textContent = parts.join('・');
+    }
+
+    // 初始化房主大廳
+    function initHostMode() {
+      $('host-root').classList.remove('hidden');
+      $('player-root').classList.add('hidden');
+      $('header-subtitle').textContent = '房主大廳模式（建議使用電腦 / 平板 / 電視投影）';
+
+      hostState.roomCode = generateRoomCode();
+      $('host-room-code').textContent = hostState.roomCode;
+
+      // 產生對應加入網址與大型 QR Code
+      const baseUrl = window.location.origin && window.location.origin !== 'null'
+        ? `${window.location.origin}${window.location.pathname}`
+        : 'https://your-github-pages-url/';
+      const joinUrl = `${baseUrl}?room=${hostState.roomCode}`;
+      $('host-join-url').value = joinUrl;
+
+      const qrBox = $('qrcode-box');
+      qrBox.innerHTML = '';
+      try {
+        if (typeof QRCode !== 'undefined') {
+          new QRCode(qrBox, {
+            text: joinUrl,
+            width: 196,
+            height: 196,
+            colorDark: '#0f172a',
+            colorLight: '#ffffff',
+            correctLevel: QRCode.CorrectLevel.M
+          });
+        } else {
+          qrBox.innerHTML = '<div class="text-xs text-slate-600 p-2">QR 套件載入中</div>';
+        }
+      } catch (e) {
+        qrBox.innerHTML = '<div class="text-xs text-slate-600 p-2">請複製下方連結加入</div>';
+      }
+
+      applyThemeBranding(hostState.themeName, hostState.cardBrand);
+      updateSettingsSummary();
+      renderSfxImportRows();
+
+      // 建立 PeerJS 房主節點
+      connectHostPeer();
+      renderHostLobby();
+    }
+
+    function connectHostPeer() {
+      if (typeof Peer === 'undefined') {
+        setConnBadge('err', 'PeerJS 未載入');
+        return;
+      }
+      setConnBadge('warn', '建立房間連線...');
+      try {
+        if (hostState.peer) hostState.peer.destroy();
+        const peerId = PEER_PREFIX + hostState.roomCode;
+        const peer = new Peer(peerId, { debug: 1 });
+        hostState.peer = peer;
+
+        peer.on('open', () => {
+          setConnBadge('ok', `房間 ${hostState.roomCode} 就緒`);
+        });
+
+        peer.on('connection', (conn) => {
+          handleIncomingPlayerConn(conn);
+        });
+
+        peer.on('error', (err) => {
+          console.warn('Host Peer error:', err);
+          if (err.type === 'unavailable-id') {
+            hostState.roomCode = generateRoomCode();
+            $('host-room-code').textContent = hostState.roomCode;
+            connectHostPeer();
+          } else {
+            setConnBadge('warn', '離線/單機測試可用');
+          }
+        });
+
+        peer.on('disconnected', () => {
+          setConnBadge('warn', '嘗試重新連線...');
+          try { peer.reconnect(); } catch {}
+        });
+      } catch (e) {
+        setConnBadge('warn', '僅本機測試模式');
+      }
+    }
+
+    // 處理手機玩家連入與訊息路由
+    function handleIncomingPlayerConn(conn) {
+      let boundClientId = null;
+
+      conn.on('data', (msg) => {
+        if (!msg || typeof msg !== 'object') return;
+
+        if (msg.type === 'JOIN') {
+          const clientId = msg.clientId || uid('p');
+          const nickname = String(msg.name || '神秘玩家').trim().slice(0, 12) || '神秘玩家';
+          boundClientId = clientId;
+
+          // 檢查是否為斷線重連（以 clientId 或離線中的同名玩家比對）
+          let existing = hostState.players.find(p => p.id === clientId);
+          if (!existing) {
+            existing = hostState.players.find(p => !p.isBot && !p.connected && p.name === nickname);
+          }
+
+          if (existing) {
+            existing.connected = true;
+            existing.name = nickname;
+            boundClientId = existing.id;
+            hostState.connections.set(existing.id, conn);
+            addHostLog(`🔌 ${existing.name} 已重新連線回到牌桌！`);
+            showToast(`${existing.name} 已重新連線`, 'success');
+          } else if (hostState.phase !== 'lobby') {
+            conn.send({ type: 'ERROR', message: '本局遊戲已開始，請等待下一局再加入！' });
+            return;
+          } else {
+            const newPlayer = {
+              id: clientId,
+              name: nickname,
+              color: AVATAR_COLORS[hostState.players.length % AVATAR_COLORS.length],
+              isBot: false,
+              connected: true,
+              hand: [],
+              calledUno: false,
+              eliminated: false,
+              finishedRank: 0
+            };
+            hostState.players.push(newPlayer);
+            hostState.connections.set(clientId, conn);
+            showToast(`${nickname} 報到成功！`, 'success');
+          }
+
+          conn.send({
+            type: 'JOINED',
+            playerId: boundClientId,
+            roomCode: hostState.roomCode,
+            phase: hostState.phase,
+            themeName: hostState.themeName,
+            cardBrand: hostState.cardBrand
+          });
+          broadcastHostState();
+          renderHostLobby();
+          if (hostState.phase === 'playing') renderHostGame();
+          return;
+        }
+
+        if (!boundClientId) return;
+
+        if (msg.type === 'PLAY_CARD') {
+          hostHandlePlayCard(boundClientId, msg.cardId, msg.chosenColor, false);
+        } else if (msg.type === 'DRAW_CARD') {
+          hostHandleDrawCard(boundClientId, false);
+        } else if (msg.type === 'CALL_UNO') {
+          hostHandleCallUno(boundClientId);
+        } else if (msg.type === 'CATCH_UNO') {
+          hostHandleCatchUno(boundClientId);
+        } else if (msg.type === 'PING') {
+          conn.send({ type: 'PONG' });
+        }
+      });
+
+      const markOffline = () => {
+        if (!boundClientId) return;
+        const p = hostState.players.find(x => x.id === boundClientId);
+        if (p && !p.isBot) {
+          p.connected = false;
+          hostState.connections.delete(boundClientId);
+          addHostLog(`⚠️ ${p.name} 暫時離線（可等待重連或由房主踢除）`);
+          renderHostLobby();
+          if (hostState.phase === 'playing') renderHostGame();
+        }
+      };
+
+      conn.on('close', markOffline);
+      conn.on('error', markOffline);
+    }
+
+    // 判斷玩家是否仍在場上輪轉（未淘汰且尚未提前完賽）
+    function isPlayerActive(p) {
+      return Boolean(p && !p.eliminated && p.finishedRank === 0);
+    }
+
+    function getActivePlayers() {
+      return hostState.players.filter(isPlayerActive);
+    }
+
+    // 取得從 currentIndex 出發第 steps 位「仍在場上」的玩家索引
+    function getNextActivePlayerIndex(steps = 1) {
+      const len = hostState.players.length;
+      if (len === 0) return -1;
+      let idx = hostState.currentIndex;
+      let moved = 0;
+      let guard = 0;
+      while (moved < steps && guard < len * 4) {
+        idx = ((idx + hostState.direction) % len + len) % len;
+        if (isPlayerActive(hostState.players[idx])) {
+          moved++;
+        }
+        guard++;
+      }
+      return idx;
+    }
+
+    // 房主新增電腦玩家 (方便單機試玩與測試多人自動配牌)
+    function hostAddBot() {
+      const botNames = ['阿明AI', '小美AI', '派對王AI', '手速怪AI', '幸運星AI', '大魔王AI', '貓咪AI', '柴犬AI', '奶茶AI', '珍奶AI', '雞排AI', '薯條AI'];
+      const used = new Set(hostState.players.map(p => p.name));
+      const baseName = botNames.find(n => !used.has(n)) || `電腦${hostState.players.length + 1}`;
+      hostState.players.push({
+        id: uid('bot'),
+        name: baseName,
+        color: AVATAR_COLORS[hostState.players.length % AVATAR_COLORS.length],
+        isBot: true,
+        connected: true,
+        hand: [],
+        calledUno: false,
+        eliminated: false,
+        finishedRank: 0
+      });
+      renderHostLobby();
+      broadcastHostState();
+    }
+
+    // 房主踢除玩家（大廳或遊戲中皆可用，防止離線卡死整局）
+    function hostKickPlayer(playerId) {
+      const idx = hostState.players.findIndex(p => p.id === playerId);
+      if (idx === -1) return;
+      const target = hostState.players[idx];
+
+      const conn = hostState.connections.get(playerId);
+      if (conn) {
+        try { conn.send({ type: 'KICKED', message: '你已被房主移出房間。' }); conn.close(); } catch {}
+        hostState.connections.delete(playerId);
+      }
+
+      if (hostState.phase === 'lobby') {
+        hostState.players.splice(idx, 1);
+        renderHostLobby();
+        broadcastHostState();
+        showToast(`已移除 ${target.name}`, 'info');
+        return;
+      }
+
+      // 遊戲進行中踢除：將其手牌放回牌庫洗牌，並修正當前輪到指標
+      const wasCurrent = (idx === hostState.currentIndex);
+      if (target.hand.length > 0) {
+        hostState.deck = shuffle([...hostState.deck, ...target.hand]);
+      }
+      hostState.players.splice(idx, 1);
+      addHostLog(`👢 房主已踢除玩家「${target.name}」，其手牌已洗回牌庫。`);
+      showPartyBanner(`👢 ${target.name} 已被踢除，遊戲繼續！`);
+
+      if (checkAndHandleAutoEnd('剩餘玩家不足，本局自動結算！')) return;
+
+      if (idx < hostState.currentIndex) {
+        hostState.currentIndex--;
+      } else if (hostState.currentIndex >= hostState.players.length) {
+        hostState.currentIndex = 0;
+      }
+
+      if (wasCurrent || !isPlayerActive(hostState.players[hostState.currentIndex])) {
+        hostState.currentIndex = getNextActivePlayerIndex(1);
+        hostStartTurn();
+      } else {
+        renderHostGame();
+        broadcastHostState();
+      }
+    }
+
+    // 檢查某位玩家是否觸發「爆牌淘汰上限」
+    function checkPlayerMaxHandBust(player) {
+      if (!hostState.enableMaxHand || !isPlayerActive(player)) return false;
+      if (player.hand.length >= hostState.maxHandLimit) {
+        player.eliminated = true;
+        player.calledUno = false;
+        const lostCount = player.hand.length;
+        // 手牌洗回牌庫
+        hostState.deck = shuffle([...hostState.deck, ...player.hand]);
+        player.hand = [];
+        hostState.eliminatedOrder.push(player.id);
+
+        soundEngine.timeoutWarn();
+        const msg = `💥 ${player.name} 手牌衝到 ${lostCount} 張（達上限 ${hostState.maxHandLimit} 張）直接爆牌淘汰算輸！`;
+        addHostLog(msg);
+        showPartyBanner(msg, true);
+        broadcastBanner(msg, true);
+        return true;
+      }
+      return false;
+    }
+
+    // 檢查是否達成結束條件（湊滿獲勝人數 或 場上剩餘活躍玩家 <= 1）
+    function checkAndHandleAutoEnd(reasonText = '') {
+      const active = getActivePlayers();
+      const targetWinners = Math.min(hostState.winnerCount, Math.max(1, hostState.players.length - 1));
+
+      if (hostState.finishedWinners.length >= targetWinners) {
+        hostFinishGame('已產生所有獲勝名額！');
+        return true;
+      }
+      if (active.length <= 1) {
+        hostFinishGame(reasonText || '場上僅剩最後存活玩家，本局結束！');
+        return true;
+      }
+      return false;
+    }
+
+    // 渲染房主大廳畫面
+    function renderHostLobby() {
+      const count = hostState.players.length;
+      const cfg = calcDeckConfig(count);
+      hostState.deckConfig = cfg;
+
+      $('stat-player-count').textContent = `${count} 人`;
+      $('stat-deck-count').textContent = `${cfg.decks} 副 (${cfg.totalCards}張)`;
+      $('stat-hand-size').textContent = `${cfg.handSize} 張`;
+      $('deck-tier-badge').textContent = count < 2 ? '至少需 2 人開局' : cfg.label;
+      $('btn-start-game').disabled = count < 2;
+
+      const listEl = $('lobby-player-list');
+      if (count === 0) {
+        listEl.innerHTML = `
+          <div class="col-span-full rounded-2xl border border-dashed border-white/15 p-6 text-center text-sm text-slate-400">
+            尚未有玩家報到，請掃描左側 QR Code 或點擊「加入電腦玩家」體驗！
+          </div>`;
+        return;
+      }
+
+      listEl.innerHTML = hostState.players.map((p, i) => `
+        <div class="flex items-center justify-between gap-2 rounded-2xl bg-slate-950/80 border border-white/10 px-3.5 py-2.5">
+          <div class="flex items-center gap-2.5 min-w-0">
+            <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-black text-white shrink-0" style="background:${p.color}">
+              ${i + 1}
+            </div>
+            <div class="min-w-0">
+              <div class="text-sm font-bold text-white truncate">${escapeHTML(p.name)} ${p.isBot ? '<span class="text-[10px] bg-sky-500/20 text-sky-300 px-1.5 py-0.5 rounded">AI</span>' : ''}</div>
+              <div class="text-[11px] ${p.connected ? 'text-emerald-400' : 'text-rose-400'}">
+                ${p.connected ? '● 已連線' : '● 離線中'}
+              </div>
+            </div>
+          </div>
+          <button type="button" data-kick-id="${p.id}" class="rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white px-2.5 py-1 text-xs font-bold transition shrink-0">
+            踢除
+          </button>
+        </div>
+      `).join('');
+    }
+
+    // 開始新一局遊戲
+    function hostStartGame() {
+      const n = hostState.players.length;
+      if (n < 2) {
+        showToast('至少需要 2 位玩家才能開始遊戲', 'warn');
+        return;
+      }
+
+      const cfg = calcDeckConfig(n);
+      hostState.deckConfig = cfg;
+      hostState.deck = buildDeck(cfg.decks);
+      hostState.discard = [];
+      hostState.direction = 1;
+      hostState.currentIndex = Math.floor(Math.random() * n);
+      hostState.logs = [];
+      hostState.finishedWinners = [];
+      hostState.eliminatedOrder = [];
+      hostState.phase = 'playing';
+
+      // 若啟用遊戲總時間限制，設定總時長與結束時間戳（剩餘 10% 將觸發加快速度 50%）
+      hostState.matchTotalMs = hostState.enableTimeLimit
+        ? hostState.timeLimitMinutes * 60 * 1000
+        : 0;
+      hostState.matchDeadline = hostState.enableTimeLimit
+        ? Date.now() + hostState.matchTotalMs
+        : 0;
+      hostState.rushTriggered = false;
+      soundEngine.setBgmSpeed(1.0);
+
+      // 發牌給每位玩家
+      for (const p of hostState.players) {
+        p.hand = [];
+        p.calledUno = false;
+        p.eliminated = false;
+        p.finishedRank = 0;
+        for (let i = 0; i < cfg.handSize; i++) {
+          p.hand.push(hostState.deck.pop());
+        }
+      }
+
+      // 翻開第一張起始牌（避免開局翻到 +4 造成困擾，若是 +4 放回洗牌重抽）
+      let firstCard = hostState.deck.pop();
+      while (firstCard && firstCard.value === 'wild4') {
+        hostState.deck.unshift(firstCard);
+        hostState.deck = shuffle(hostState.deck);
+        firstCard = hostState.deck.pop();
+      }
+      hostState.discard.push(firstCard);
+      hostState.activeColor = firstCard.color === 'wild'
+        ? COLORS[Math.floor(Math.random() * 4)]
+        : firstCard.color;
+
+      $('host-lobby').classList.add('hidden');
+      $('host-game').classList.remove('hidden');
+      $('winner-modal').classList.add('hidden');
+      $('host-deck-meta').textContent = `${cfg.decks} 副牌・共 ${cfg.totalCards} 張・初始 ${cfg.handSize} 張`;
+
+      // 顯示總時間倒數與規則徽章
+      if (hostState.enableTimeLimit) {
+        $('host-match-timer-badge').classList.remove('hidden');
+      } else {
+        $('host-match-timer-badge').classList.add('hidden');
+      }
+      const pills = [];
+      if (hostState.enableMaxHand) pills.push(`<span class="rounded-lg bg-rose-500/20 border border-rose-400/40 px-2 py-1 text-[11px] font-bold text-rose-200">💥 滿 ${hostState.maxHandLimit} 張淘汰</span>`);
+      if (hostState.winnerCount > 1 || hostState.enableTimeLimit) pills.push(`<span class="rounded-lg bg-amber-400/15 border border-amber-400/40 px-2 py-1 text-[11px] font-bold text-amber-200">🏆 取前 ${hostState.winnerCount} 名勝出</span>`);
+      $('host-active-rules-pills').innerHTML = pills.join('');
+
+      addHostLog(`🎉 【${hostState.themeName}】開局！共 ${n} 位玩家，自動配置 ${cfg.decks} 副牌（每人 ${cfg.handSize} 張），起始牌為【${getCardLabel(firstCard)}】。`);
+      soundEngine.playCard();
+      hostStartTurn();
+    }
+
+    // 從牌庫抽 N 張牌（若牌庫不足，自動將棄牌堆保留最上方 1 張後重洗補回）
+    function hostDrawFromDeck(count) {
+      const drawn = [];
+      for (let i = 0; i < count; i++) {
+        if (hostState.deck.length === 0) {
+          if (hostState.discard.length <= 1) break;
+          const top = hostState.discard.pop();
+          hostState.deck = shuffle(hostState.discard);
+          hostState.discard = [top];
+          addHostLog('🔄 牌庫已抽完，系統自動將棄牌堆重新洗牌補回牌庫！');
+          showPartyBanner('🔄 牌庫見底！棄牌堆已自動重洗補回！');
+        }
+        if (hostState.deck.length > 0) {
+          drawn.push(hostState.deck.pop());
+        }
+      }
+      return drawn;
+    }
+
+    // 計算目前有效單回合秒數（進入最後 10% 衝刺時速度加快 50%，即秒數除以 1.5）
+    function getEffectiveTurnSeconds() {
+      if (hostState.rushTriggered) {
+        return Math.max(1, Number((hostState.turnSeconds / 1.5).toFixed(1)));
+      }
+      return hostState.turnSeconds;
+    }
+
+    // 啟動目前玩家的回合與即時倒數計時器
+    function hostStartTurn() {
+      clearInterval(hostState.timerInterval);
+      clearTimeout(hostState.botTimer);
+
+      if (hostState.phase !== 'playing') return;
+      if (checkAndHandleAutoEnd()) return;
+
+      if (!isPlayerActive(hostState.players[hostState.currentIndex])) {
+        hostState.currentIndex = getNextActivePlayerIndex(1);
+      }
+
+      const current = hostState.players[hostState.currentIndex];
+      const effTurnSec = getEffectiveTurnSeconds();
+      hostState.turnDeadline = Date.now() + effTurnSec * 1000;
+      hostState.lastUrgentSec = -1;
+
+      renderHostGame();
+      broadcastHostState();
+
+      // 啟動 100ms 高頻倒數更新（同時處理本回合倒數與本局總限時倒數）
+      hostState.timerInterval = setInterval(() => {
+        if (hostState.phase !== 'playing') {
+          clearInterval(hostState.timerInterval);
+          return;
+        }
+        const now = Date.now();
+
+        // 1. 檢查本局總遊戲時間限制與剩餘 10% 加速 50% 觸發
+        if (hostState.enableTimeLimit && hostState.matchDeadline > 0) {
+          const matchRemainMs = Math.max(0, hostState.matchDeadline - now);
+          const formattedTime = formatMMSS(matchRemainMs);
+          const mText = $('host-match-timer-text');
+          const mBadge = $('host-match-timer-badge');
+          const hudTime = $('host-hud-match-time');
+          const hudTimeCard = $('host-hud-time-card');
+          const rushPill = $('host-rush-pill');
+
+          mText.textContent = formattedTime;
+          if (hudTime) hudTime.textContent = formattedTime;
+
+          // 剩餘時間 <= 10% 時，觸發「加快速度 50%」並跳出醒目全場提示！
+          if (!hostState.rushTriggered && matchRemainMs > 0 && hostState.matchTotalMs > 0 && matchRemainMs <= hostState.matchTotalMs * 0.10) {
+            hostState.rushTriggered = true;
+            // 立即縮短當前這回合的剩餘時間（速度加快 50%）
+            const curRemain = Math.max(0, hostState.turnDeadline - now);
+            hostState.turnDeadline = now + Math.max(1000, curRemain / 1.5);
+            soundEngine.setBgmSpeed(1.5);
+            soundEngine.unoShout();
+
+            const rushMsg = `⚡ 剩餘時間只剩 10%！全場加快速度 50%（出牌縮短為 ${getEffectiveTurnSeconds()} 秒）！🔥`;
+            addHostLog(rushMsg);
+            showPartyBanner(rushMsg, true);
+            broadcastBanner(rushMsg, true);
+            broadcastHostState();
+          }
+
+          if (hostState.rushTriggered || matchRemainMs <= 30000) {
+            mBadge.classList.add('border-rose-400', 'bg-rose-500/20');
+            mText.classList.add('text-rose-300');
+            if (hudTime) {
+              hudTime.classList.add('text-rose-400');
+              hudTime.classList.remove('text-emerald-300');
+            }
+            if (hudTimeCard) hudTimeCard.classList.add('border-rose-400/60', 'bg-rose-950/40');
+          } else {
+            mBadge.classList.remove('border-rose-400', 'bg-rose-500/20');
+            mText.classList.remove('text-rose-300');
+            if (hudTime) {
+              hudTime.classList.remove('text-rose-400');
+              hudTime.classList.add('text-emerald-300');
+            }
+            if (hudTimeCard) hudTimeCard.classList.remove('border-rose-400/60', 'bg-rose-950/40');
+          }
+          if (rushPill) rushPill.classList.toggle('hidden', !hostState.rushTriggered);
+
+          if (matchRemainMs <= 0) {
+            clearInterval(hostState.timerInterval);
+            clearTimeout(hostState.botTimer);
+            const msg = `⏳ 遊戲時間到！將依剩餘手牌張數選出前 ${hostState.winnerCount} 名贏家！`;
+            showPartyBanner(msg, false);
+            broadcastBanner(msg, false);
+            hostFinishGame(`⏳ 時間到！依剩餘手牌最少選出前 ${hostState.winnerCount} 名勝出`);
+            return;
+          }
+        }
+
+        // 2. 單回合出牌倒數
+        const remainMs = Math.max(0, hostState.turnDeadline - now);
+        const remainSec = remainMs / 1000;
+        updateHostTimerUI(remainSec);
+
+        // 最後 3 秒發出滴答警示音
+        const ceilSec = Math.ceil(remainSec);
+        if (ceilSec <= 3 && ceilSec > 0 && ceilSec !== hostState.lastUrgentSec) {
+          hostState.lastUrgentSec = ceilSec;
+          soundEngine.tickUrgent();
+        }
+
+        if (remainMs <= 0) {
+          clearInterval(hostState.timerInterval);
+          hostHandleTimeout(current.id);
+        }
+      }, 100);
+
+      // 若目前玩家是電腦 AI，隨機延遲自動出牌（進入 10% 加速模式時同步加快 50%）
+      if (current.isBot) {
+        const speedDiv = hostState.rushTriggered ? 1.5 : 1.0;
+        const delayMs = Math.min(effTurnSec * 650, (1200 + Math.random() * 1400) / speedDiv);
+        hostState.botTimer = setTimeout(() => {
+          if (hostState.phase !== 'playing') return;
+          if (hostState.players[hostState.currentIndex]?.id !== current.id) return;
+          hostRunBotAction(current);
+        }, delayMs);
+      }
+    }
+
+    // ========================================================================
+    // 核心特色：逾時自動代打演算法 —「出好牌、留爛牌」懲罰邏輯
+    // ========================================================================
+    function pickBestCardToSacrifice(hand, topCard, activeColor) {
+      const playable = hand.filter(c => isCardPlayable(c, topCard, activeColor));
+      if (playable.length === 0) return null;
+
+      const colorCounts = { red: 0, yellow: 0, green: 0, blue: 0 };
+      for (const c of hand) {
+        if (colorCounts[c.color] !== undefined) colorCounts[c.color]++;
+      }
+
+      function scoreCard(card) {
+        if (card.value === 'wild4')   return 10000; // 第 1 優先：+4 萬用加四
+        if (card.value === 'wild')    return 9000;  // 第 2 優先：萬用變色牌
+        if (card.value === 'draw2')   return 8000;  // 第 3 優先：同色 +2
+        if (card.value === 'skip')    return 7000;  // 第 4 優先：同色跳過
+        if (card.value === 'reverse') return 6000;  // 第 5 優先：同色迴轉
+        const rarityBonus = Math.max(0, 50 - (colorCounts[card.color] || 1) * 5) * 100;
+        const pointBonus = card.points * 10;
+        return rarityBonus + pointBonus;
+      }
+
+      playable.sort((a, b) => scoreCard(b) - scoreCard(a));
+      const chosenCard = playable[0];
+
+      let chosenColor = chosenCard.color;
+      if (chosenCard.color === 'wild') {
+        const sortedColors = [...COLORS].sort((a, b) => colorCounts[a] - colorCounts[b]);
+        chosenColor = sortedColors[0] || activeColor;
+      }
+
+      return { card: chosenCard, chosenColor };
+    }
+
+    // 觸發逾時懲罰
+    function hostHandleTimeout(playerId) {
+      const player = hostState.players[hostState.currentIndex];
+      if (!player || player.id !== playerId || hostState.phase !== 'playing') return;
+
+      const topCard = hostState.discard[hostState.discard.length - 1];
+      const sacrifice = pickBestCardToSacrifice(player.hand, topCard, hostState.activeColor);
+
+      soundEngine.timeoutWarn();
+
+      if (sacrifice) {
+        const bannerMsg = `⏰ ${player.name} 逾時！系統已強制幫他把【${getCardLabel(sacrifice.card)}】丟出去了！`;
+        showPartyBanner(bannerMsg, true);
+        broadcastBanner(bannerMsg, true);
+        hostHandlePlayCard(player.id, sacrifice.card.id, sacrifice.chosenColor, true);
+      } else {
+        const bannerMsg = `⏰ ${player.name} 逾時且無牌可出，系統強制幫他抽了 1 張牌！`;
+        showPartyBanner(bannerMsg, true);
+        broadcastBanner(bannerMsg, true);
+        hostHandleDrawCard(player.id, true);
+      }
+    }
+
+    // 電腦 AI 正常出牌邏輯（測試用）
+    function hostRunBotAction(bot) {
+      const topCard = hostState.discard[hostState.discard.length - 1];
+      const playable = bot.hand.filter(c => isCardPlayable(c, topCard, hostState.activeColor));
+      if (playable.length === 0) {
+        hostHandleDrawCard(bot.id, false);
+        return;
+      }
+      const normal = playable.filter(c => c.color !== 'wild');
+      const pick = normal.length > 0 ? normal[0] : playable[0];
+      let chosenColor = pick.color;
+      if (pick.color === 'wild') {
+        const counts = { red: 0, yellow: 0, green: 0, blue: 0 };
+        bot.hand.forEach(c => { if (counts[c.color] !== undefined) counts[c.color]++; });
+        chosenColor = [...COLORS].sort((a, b) => counts[b] - counts[a])[0];
+      }
+      if (bot.hand.length === 2 && Math.random() < 0.75) {
+        bot.calledUno = true;
+      }
+      hostHandlePlayCard(bot.id, pick.id, chosenColor, false);
+    }
+
+    // 處理出牌動作（真人、AI、逾時自動代打共用）
+    function hostHandlePlayCard(playerId, cardId, chosenColor, isAutoTimeout = false) {
+      if (hostState.phase !== 'playing') return;
+      const player = hostState.players[hostState.currentIndex];
+      if (!player || player.id !== playerId || !isPlayerActive(player)) return;
+
+      const cardIdx = player.hand.findIndex(c => c.id === cardId);
+      if (cardIdx === -1) return;
+
+      const card = player.hand[cardIdx];
+      const topCard = hostState.discard[hostState.discard.length - 1];
+      if (!isCardPlayable(card, topCard, hostState.activeColor)) return;
+
+      clearInterval(hostState.timerInterval);
+      clearTimeout(hostState.botTimer);
+
+      player.hand.splice(cardIdx, 1);
+      hostState.discard.push(card);
+
+      if (card.color === 'wild') {
+        hostState.activeColor = COLORS.includes(chosenColor) ? chosenColor : COLORS[0];
+      } else {
+        hostState.activeColor = card.color;
+      }
+
+      if (player.hand.length > 1) {
+        player.calledUno = false;
+      }
+
+      const prefix = isAutoTimeout ? '⏰[逾時代打] ' : '';
+      const colorNote = card.color === 'wild' ? `，指定【${COLOR_META[hostState.activeColor].name}】` : '';
+      addHostLog(`${prefix}${player.name} 打出了【${getCardLabel(card)}】${colorNote}`);
+
+      if (!isAutoTimeout) soundEngine.playCard();
+
+      // 檢查是否出完手牌
+      if (player.hand.length === 0) {
+        hostState.finishedWinners.push(player.id);
+        player.finishedRank = hostState.finishedWinners.length;
+        const winMsg = `🏆 ${player.name} 清空手牌，奪得第 ${player.finishedRank} 名！`;
+        addHostLog(winMsg);
+        showPartyBanner(winMsg, false);
+        broadcastBanner(winMsg, false);
+
+        if (checkAndHandleAutoEnd()) return;
+
+        // 尚未湊滿獲勝人數，輪到下一位仍在場上的玩家
+        hostState.currentIndex = getNextActivePlayerIndex(1);
+        hostStartTurn();
+        return;
+      }
+
+      // 結算功能牌效果並決定下一位玩家
+      let steps = 1;
+      const activeCount = getActivePlayers().length;
+
+      if (card.value === 'reverse') {
+        if (activeCount === 2) {
+          steps = 2;
+          addHostLog(`⇄ 兩人局迴轉視同跳過，繼續輪到 ${player.name}！`);
+        } else {
+          hostState.direction *= -1;
+          addHostLog(`⇄ 方向反轉為【${hostState.direction === 1 ? '順時針' : '逆時針'}】！`);
+        }
+      } else if (card.value === 'skip') {
+        const skipped = hostState.players[getNextActivePlayerIndex(1)];
+        steps = 2;
+        addHostLog(`⊘ ${skipped.name} 被跳過一回合！`);
+      } else if (card.value === 'draw2') {
+        const victimIdx = getNextActivePlayerIndex(1);
+        const victim = hostState.players[victimIdx];
+        const drawn = hostDrawFromDeck(2);
+        victim.hand.push(...drawn);
+        victim.calledUno = false;
+        addHostLog(`💥 ${victim.name} 遭到 +2 攻擊，強制抽 ${drawn.length} 張並跳過回合！`);
+        const busted = checkPlayerMaxHandBust(victim);
+        if (busted && checkAndHandleAutoEnd()) return;
+        steps = busted ? 1 : 2; // 若受害者已爆牌淘汰，下一個活躍玩家就已經是原來的下下家
+      } else if (card.value === 'wild4') {
+        const victimIdx = getNextActivePlayerIndex(1);
+        const victim = hostState.players[victimIdx];
+        const drawn = hostDrawFromDeck(4);
+        victim.hand.push(...drawn);
+        victim.calledUno = false;
+        addHostLog(`💣 ${victim.name} 遭到 +4 重擊，強制抽 ${drawn.length} 張並跳過回合！`);
+        const busted = checkPlayerMaxHandBust(victim);
+        if (busted && checkAndHandleAutoEnd()) return;
+        steps = busted ? 1 : 2;
+      }
+
+      hostState.currentIndex = getNextActivePlayerIndex(steps);
+      hostStartTurn();
+    }
+
+    // 處理抽牌動作（抽 1 張並直接結束回合）
+    function hostHandleDrawCard(playerId, isAutoTimeout = false) {
+      if (hostState.phase !== 'playing') return;
+      const player = hostState.players[hostState.currentIndex];
+      if (!player || player.id !== playerId || !isPlayerActive(player)) return;
+
+      clearInterval(hostState.timerInterval);
+      clearTimeout(hostState.botTimer);
+
+      const drawn = hostDrawFromDeck(1);
+      player.hand.push(...drawn);
+      player.calledUno = false;
+
+      const prefix = isAutoTimeout ? '⏰[逾時強制] ' : '🃏 ';
+      addHostLog(`${prefix}${player.name} 抽了 1 張牌並結束回合。`);
+      if (!isAutoTimeout) soundEngine.drawCard();
+
+      if (checkPlayerMaxHandBust(player)) {
+        if (checkAndHandleAutoEnd()) return;
+      }
+
+      hostState.currentIndex = getNextActivePlayerIndex(1);
+      hostStartTurn();
+    }
+
+    // 玩家喊 UNO!
+    function hostHandleCallUno(playerId) {
+      const player = hostState.players.find(p => p.id === playerId);
+      if (!player || hostState.phase !== 'playing' || !isPlayerActive(player)) return;
+      if (player.hand.length <= 2 && !player.calledUno) {
+        player.calledUno = true;
+        soundEngine.unoShout();
+        const msg = `📣 ${player.name} 大喊了一聲：UNO！！`;
+        addHostLog(msg);
+        showPartyBanner(msg, false);
+        broadcastBanner(msg, false);
+        renderHostGame();
+        broadcastHostState();
+      }
+    }
+
+    // 其他玩家按「抓沒喊 UNO」
+    function hostHandleCatchUno(catcherId) {
+      if (hostState.phase !== 'playing') return;
+      const catcher = hostState.players.find(p => p.id === catcherId);
+      const guilty = hostState.players.find(p => p.id !== catcherId && isPlayerActive(p) && p.hand.length === 1 && !p.calledUno);
+      if (!catcher || !guilty) return;
+
+      const drawn = hostDrawFromDeck(2);
+      guilty.hand.push(...drawn);
+      guilty.calledUno = false;
+      soundEngine.timeoutWarn();
+
+      const msg = `🚨 ${catcher.name} 成功抓包 ${guilty.name} 沒喊 UNO！罰抽 2 張牌！`;
+      addHostLog(msg);
+      showPartyBanner(msg, true);
+      broadcastBanner(msg, true);
+
+      if (checkPlayerMaxHandBust(guilty)) {
+        if (checkAndHandleAutoEnd()) return;
+      }
+
+      renderHostGame();
+      broadcastHostState();
+    }
+
+    // 結算勝利（支援多位獲勝者、限時依剩餘手牌排名、爆牌淘汰墊底）
+    function hostFinishGame(reason = '清空手牌勝出！') {
+      clearInterval(hostState.timerInterval);
+      clearTimeout(hostState.botTimer);
+      hostState.phase = 'ended';
+      hostState.rushTriggered = false;
+      soundEngine.setBgmSpeed(1.0);
+      soundEngine.winFanfare();
+
+      // 排序邏輯：1. 提前清空手牌完賽者(依完賽名次) → 2. 未淘汰存活者(張數少優先、再比總點數少) → 3. 爆牌淘汰者(越晚淘汰越前面)
+      const sorted = [...hostState.players].sort((a, b) => {
+        if (a.finishedRank > 0 && b.finishedRank > 0) return a.finishedRank - b.finishedRank;
+        if (a.finishedRank > 0) return -1;
+        if (b.finishedRank > 0) return 1;
+        if (a.eliminated !== b.eliminated) return a.eliminated ? 1 : -1;
+        if (a.eliminated && b.eliminated) {
+          return hostState.eliminatedOrder.indexOf(b.id) - hostState.eliminatedOrder.indexOf(a.id);
+        }
+        if (a.hand.length !== b.hand.length) return a.hand.length - b.hand.length;
+        return sumHandPoints(a.hand) - sumHandPoints(b.hand);
+      });
+
+      const winSlots = Math.max(1, Math.min(hostState.winnerCount, sorted.filter(p => !p.eliminated).length || 1));
+      const ranking = sorted.map((p, i) => ({
+        rank: i + 1,
+        name: p.name,
+        cardsLeft: p.hand.length,
+        points: sumHandPoints(p.hand),
+        eliminated: p.eliminated,
+        isWinner: !p.eliminated && i < winSlots
+      }));
+
+      const winners = ranking.filter(r => r.isWinner);
+      const winnerDisplay = winners.map(w => w.name).join('、') || sorted[0]?.name || '-';
+
+      addHostLog(`🏆 本局結束！獲勝名單：${winnerDisplay}（${reason}）`);
+      showWinnerModal(winnerDisplay, ranking, true, reason, winSlots);
+
+      for (const conn of hostState.connections.values()) {
+        try {
+          conn.send({ type: 'GAME_OVER', winnerName: winnerDisplay, ranking, reason, winSlots });
+        } catch {}
+      }
+    }
+
+    // 返回大廳準備下一局
+    function hostBackToLobby() {
+      clearInterval(hostState.timerInterval);
+      clearTimeout(hostState.botTimer);
+      hostState.phase = 'lobby';
+      hostState.rushTriggered = false;
+      soundEngine.setBgmSpeed(1.0);
+      $('host-game').classList.add('hidden');
+      $('host-lobby').classList.remove('hidden');
+      $('winner-modal').classList.add('hidden');
+      renderHostLobby();
+      broadcastHostState();
+    }
+
+    // 新增即時戰報
+    function addHostLog(text) {
+      const now = new Date();
+      const ts = `${String(now.getMinutes()).padStart(2, '0')}:${String(now.getSeconds()).padStart(2, '0')}`;
+      hostState.logs.unshift({ ts, text });
+      if (hostState.logs.length > 35) hostState.logs.pop();
+      const box = $('host-event-log');
+      if (box) {
+        box.innerHTML = hostState.logs.map(l => `
+          <div class="rounded-xl bg-slate-950/70 border border-white/5 px-3 py-2 text-slate-200">
+            <span class="text-[10px] font-mono text-slate-500 mr-1.5">${l.ts}</span>${escapeHTML(l.text)}
+          </div>
+        `).join('');
+      }
+    }
+
+    // 更新房主倒數條 UI
+    function updateHostTimerUI(remainSec) {
+      const effSec = getEffectiveTurnSeconds();
+      const pct = Math.max(0, Math.min(100, (remainSec / effSec) * 100));
+      $('host-timer-text').textContent = `${remainSec.toFixed(1)}s`;
+      $('host-timer-bar').style.width = `${pct}%`;
+
+      const box = $('host-timer-box');
+      if (remainSec <= 3.0 && remainSec > 0) {
+        box.classList.add('timer-urgent');
+        $('host-timer-text').classList.add('text-rose-400');
+        $('host-timer-text').classList.remove('text-amber-300');
+      } else {
+        box.classList.remove('timer-urgent');
+        $('host-timer-text').classList.remove('text-rose-400');
+        $('host-timer-text').classList.add('text-amber-300');
+      }
+    }
+
+    // 渲染房主遊戲進行中大螢幕
+    function renderHostGame() {
+      const current = hostState.players[hostState.currentIndex];
+      const topCard = hostState.discard[hostState.discard.length - 1];
+
+      $('host-dir-badge').textContent = hostState.direction === 1 ? '↻ 順時針' : '↺ 逆時針';
+      $('host-current-player').textContent = current ? current.name : '-';
+      $('host-draw-count').textContent = `牌庫剩餘：${hostState.deck.length} 張`;
+      $('host-deck-back-brand').textContent = hostState.cardBrand || 'UNO';
+
+      // 更新頂部即時戰況儀表板（淘汰人數 / 完成人數 / 剩餘人數 / 總倒數）
+      const eliminatedCount = hostState.players.filter(p => p.eliminated).length;
+      const finishedCount = hostState.players.filter(p => p.finishedRank > 0).length;
+      const remainingCount = hostState.players.filter(isPlayerActive).length;
+      $('host-hud-eliminated').textContent = `${eliminatedCount} 人`;
+      $('host-hud-finished').textContent = `${finishedCount} 人`;
+      $('host-hud-remaining').textContent = `${remainingCount} 人`;
+      if (!hostState.enableTimeLimit) {
+        $('host-hud-match-time').textContent = '不限時';
+        $('host-hud-match-time').className = 'text-lg sm:text-xl font-black font-mono text-slate-300';
+        $('host-rush-pill').classList.add('hidden');
+        $('host-hud-time-card').classList.remove('border-rose-400/60', 'bg-rose-950/40');
+      } else {
+        $('host-hud-match-time').textContent = formatMMSS(Math.max(0, hostState.matchDeadline - Date.now()));
+        $('host-rush-pill').classList.toggle('hidden', !hostState.rushTriggered);
+      }
+
+      if (topCard) {
+        $('host-top-card-slot').innerHTML = renderCardHTML(topCard, 'w-28 h-40 sm:w-36 sm:h-52', '', '', hostState.cardBrand);
+      }
+
+      const cMeta = COLOR_META[hostState.activeColor] || COLOR_META.red;
+      $('host-active-color-dot').className = `w-3.5 h-3.5 rounded-full ${cMeta.dot}`;
+      $('host-active-color-name').textContent = `目前顏色：${cMeta.name}`;
+
+      // 檢查是否有人剩 1 張沒喊 UNO
+      const uncalled = hostState.players.find(p => isPlayerActive(p) && p.hand.length === 1 && !p.calledUno);
+      const alertEl = $('host-uno-alert');
+      if (uncalled) {
+        alertEl.textContent = `🚨 警告：${uncalled.name} 剩 1 張牌還沒喊 UNO！手機端可按「抓沒喊 UNO」罰抽 2 張！`;
+        alertEl.classList.remove('hidden');
+      } else {
+        alertEl.classList.add('hidden');
+      }
+
+      // 渲染所有玩家座位卡片
+      $('host-players-grid').innerHTML = hostState.players.map((p, i) => {
+        const isTurn = i === hostState.currentIndex && isPlayerActive(p);
+        let statusBadge = '';
+        if (p.eliminated) {
+          statusBadge = '<span class="rounded-full bg-rose-700 text-white px-2 py-0.5 text-[10px] font-black">💥 爆牌淘汰</span>';
+        } else if (p.finishedRank > 0) {
+          statusBadge = `<span class="rounded-full bg-emerald-400 text-slate-950 px-2 py-0.5 text-[10px] font-black">🏆 第${p.finishedRank}名</span>`;
+        } else if (p.hand.length === 1) {
+          statusBadge = p.calledUno
+            ? '<span class="rounded-full bg-amber-400 text-slate-950 px-2 py-0.5 text-[10px] font-black">UNO!</span>'
+            : '<span class="rounded-full bg-rose-500 text-white px-2 py-0.5 text-[10px] font-black animate-pulse">沒喊UNO!</span>';
+        }
+
+        const cardStyle = p.eliminated
+          ? 'bg-slate-950/40 border-rose-900/50 opacity-55'
+          : (p.finishedRank > 0
+              ? 'bg-emerald-950/50 border-emerald-400/50'
+              : (isTurn ? 'bg-indigo-950/90 border-amber-400 shadow-lg shadow-amber-400/20 scale-[1.03]' : 'bg-slate-950/75 border-white/10'));
+
+        const dangerLimit = hostState.enableMaxHand && !p.eliminated && p.hand.length >= hostState.maxHandLimit - 2;
+
+        return `
+          <div class="rounded-2xl p-3 border-2 transition-all ${cardStyle}">
+            <div class="flex items-center justify-between gap-1 mb-1.5">
+              <span class="text-xs font-black text-white truncate">${escapeHTML(p.name)}</span>
+              ${statusBadge}
+            </div>
+            <div class="flex items-end justify-between">
+              <div>
+                <div class="text-2xl font-black ${p.eliminated ? 'text-rose-400' : (dangerLimit ? 'text-rose-400 animate-pulse' : (p.hand.length <= 2 ? 'text-amber-300' : 'text-sky-300'))}">
+                  ${p.eliminated ? 'OUT' : `${p.hand.length}<span class="text-xs font-normal text-slate-400 ml-1">張</span>`}
+                </div>
+                <div class="text-[10px] ${p.connected ? 'text-emerald-400' : 'text-rose-400 font-bold'}">
+                  ${p.isBot ? '🤖 電腦' : (p.connected ? '● 在線' : '⚠️ 已離線')}
+                </div>
+              </div>
+              ${!p.isBot ? `<button type="button" data-kick-id="${p.id}" class="rounded-lg bg-slate-800 hover:bg-rose-600 text-slate-300 hover:text-white px-2 py-1 text-[10px] font-bold transition">踢除</button>` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    // 廣播最新狀態給每位已連線手機端（嚴格過濾：每位玩家只能收到「自己的手牌」）
+    function broadcastHostState() {
+      const topCard = hostState.discard[hostState.discard.length - 1] || null;
+      const current = hostState.players[hostState.currentIndex] || null;
+      const uncalledUno = hostState.players.find(p => isPlayerActive(p) && p.hand.length === 1 && !p.calledUno);
+
+      for (const p of hostState.players) {
+        if (p.isBot) continue;
+        const conn = hostState.connections.get(p.id);
+        if (!conn || !conn.open) continue;
+
+        const payload = {
+          type: 'STATE_SYNC',
+          phase: hostState.phase,
+          roomCode: hostState.roomCode,
+          themeName: hostState.themeName,
+          cardBrand: hostState.cardBrand,
+          playerCount: hostState.players.length,
+          turnSeconds: hostState.turnSeconds,
+          effectiveTurnSeconds: getEffectiveTurnSeconds(),
+          rushSpeedActive: hostState.rushTriggered,
+          eliminatedCount: hostState.players.filter(x => x.eliminated).length,
+          finishedCount: hostState.players.filter(x => x.finishedRank > 0).length,
+          remainingCount: hostState.players.filter(isPlayerActive).length,
+          enableMaxHand: hostState.enableMaxHand,
+          maxHandLimit: hostState.maxHandLimit,
+          enableTimeLimit: hostState.enableTimeLimit,
+          timeLimitMinutes: hostState.timeLimitMinutes,
+          winnerCount: hostState.winnerCount,
+          matchRemainMs: hostState.enableTimeLimit ? Math.max(0, hostState.matchDeadline - Date.now()) : 0,
+          // 個人與牌局即時資料
+          yourHand: p.hand,
+          yourCalledUno: p.calledUno,
+          yourEliminated: p.eliminated,
+          yourFinishedRank: p.finishedRank,
+          isYourTurn: Boolean(current && current.id === p.id && isPlayerActive(p)),
+          currentPlayerName: current ? current.name : '',
+          topCard,
+          activeColor: hostState.activeColor,
+          direction: hostState.direction,
+          deckCount: hostState.deck.length,
+          remainMs: Math.max(0, hostState.turnDeadline - Date.now()),
+          canCatchUno: Boolean(uncalledUno && uncalledUno.id !== p.id && !p.eliminated),
+          uncalledPlayerName: uncalledUno ? uncalledUno.name : ''
+        };
+        try { conn.send(payload); } catch {}
+      }
+    }
+
+    function broadcastBanner(text, isTimeout) {
+      for (const conn of hostState.connections.values()) {
+        if (conn && conn.open) {
+          try { conn.send({ type: 'BANNER', text, isTimeout }); } catch {}
+        }
+      }
+    }
+
+    // ========================================================================
+    // 4. 手機玩家系統 (Client Controller)
+    // ========================================================================
+    const clientState = {
+      peer: null,
+      conn: null,
+      clientId: safeStorage.get('uno_client_id') || uid('u'),
+      roomCode: '',
+      nickname: safeStorage.get('uno_nickname') || '',
+      cardBrand: 'UNO',
+      pendingWildCardId: null,
+      localDeadline: 0,
+      localMatchDeadline: 0,
+      turnSeconds: 10,
+      timerInterval: null,
+      lastUrgentSec: -1,
+      heartbeatInterval: null,
+      latestState: null
+    };
+    safeStorage.set('uno_client_id', clientState.clientId);
+
+    // 初始化手機玩家模式
+    function initPlayerMode(prefillRoom = '') {
+      $('host-root').classList.add('hidden');
+      $('player-root').classList.remove('hidden');
+      $('header-subtitle').textContent = '手機玩家模式（專屬私人手牌介面）';
+
+      $('player-join-screen').classList.remove('hidden');
+      $('player-waiting-screen').classList.add('hidden');
+      $('player-game-screen').classList.add('hidden');
+
+      if (prefillRoom) {
+        $('input-room-code').value = prefillRoom.toUpperCase();
+      }
+      if (clientState.nickname) {
+        $('input-nickname').value = clientState.nickname;
+      }
+      setConnBadge('warn', '請輸入暱稱報到');
+    }
+
+    // 玩家點擊報到連線至房主
+    function clientConnectToRoom() {
+      const roomCode = $('input-room-code').value.trim().toUpperCase();
+      const nickname = $('input-nickname').value.trim();
+
+      if (roomCode.length < 4) {
+        showToast('請輸入正確的 4 位數房間代碼', 'warn');
+        return;
+      }
+      if (!nickname) {
+        showToast('請先輸入你的暱稱', 'warn');
+        return;
+      }
+
+      clientState.roomCode = roomCode;
+      clientState.nickname = nickname;
+      safeStorage.set('uno_nickname', nickname);
+
+      $('btn-player-join').disabled = true;
+      $('player-join-status').textContent = `正在連線至房間 ${roomCode}...`;
+      setConnBadge('warn', '連線房主中...');
+
+      if (typeof Peer === 'undefined') {
+        $('player-join-status').textContent = 'PeerJS 函式庫載入失敗，請檢查網路。';
+        $('btn-player-join').disabled = false;
+        return;
+      }
+
+      try {
+        if (clientState.peer) clientState.peer.destroy();
+        const peer = new Peer({ debug: 1 });
+        clientState.peer = peer;
+
+        peer.on('open', () => {
+          const hostPeerId = PEER_PREFIX + roomCode;
+          const conn = peer.connect(hostPeerId, { reliable: true });
+          clientState.conn = conn;
+
+          conn.on('open', () => {
+            setConnBadge('ok', `已連上房間 ${roomCode}`);
+            conn.send({
+              type: 'JOIN',
+              clientId: clientState.clientId,
+              name: nickname
+            });
+            clearInterval(clientState.heartbeatInterval);
+            clientState.heartbeatInterval = setInterval(() => {
+              if (conn.open) {
+                try { conn.send({ type: 'PING' }); } catch {}
+              }
+            }, 8000);
+          });
+
+          conn.on('data', (msg) => handleClientMessage(msg));
+
+          conn.on('close', () => {
+            setConnBadge('err', '與房主斷線');
+            showToast('與房主連線中斷，可重新整理或點報到重連', 'error');
+            $('btn-player-join').disabled = false;
+          });
+
+          conn.on('error', () => {
+            setConnBadge('err', '連線失敗');
+            $('player-join-status').textContent = '找不到此房間，請確認代碼是否正確。';
+            $('btn-player-join').disabled = false;
+          });
+        });
+
+        peer.on('error', (err) => {
+          console.warn('Client Peer error:', err);
+          setConnBadge('err', '連線異常');
+          $('player-join-status').textContent = '無法連線至該房間，請確認房主大廳已開啟。';
+          $('btn-player-join').disabled = false;
+        });
+      } catch (e) {
+        $('player-join-status').textContent = '連線建立失敗，請重試。';
+        $('btn-player-join').disabled = false;
+      }
+    }
+
+    // 處理房主傳來的同步訊息
+    function handleClientMessage(msg) {
+      if (!msg || typeof msg !== 'object') return;
+
+      if (msg.type === 'ERROR') {
+        showToast(msg.message, 'error');
+        $('player-join-status').textContent = msg.message;
+        $('btn-player-join').disabled = false;
+        return;
+      }
+
+      if (msg.type === 'KICKED') {
+        showToast(msg.message, 'error');
+        initPlayerMode(clientState.roomCode);
+        $('btn-player-join').disabled = false;
+        return;
+      }
+
+      if (msg.type === 'JOINED') {
+        clientState.clientId = msg.playerId;
+        safeStorage.set('uno_client_id', msg.playerId);
+        if (msg.themeName || msg.cardBrand) {
+          clientState.cardBrand = msg.cardBrand || 'UNO';
+          applyThemeBranding(msg.themeName, msg.cardBrand);
+        }
+        $('player-join-screen').classList.add('hidden');
+        $('player-waiting-name').textContent = `玩家：${clientState.nickname}`;
+        $('player-waiting-room').textContent = msg.roomCode;
+        if (msg.phase === 'lobby') {
+          $('player-waiting-screen').classList.remove('hidden');
+          $('player-game-screen').classList.add('hidden');
+        }
+        return;
+      }
+
+      if (msg.type === 'BANNER') {
+        showPartyBanner(msg.text, msg.isTimeout);
+        if (msg.isTimeout) soundEngine.timeoutWarn();
+        return;
+      }
+
+      if (msg.type === 'GAME_OVER') {
+        clearInterval(clientState.timerInterval);
+        soundEngine.winFanfare();
+        showWinnerModal(msg.winnerName, msg.ranking, false, msg.reason, msg.winSlots);
+        return;
+      }
+
+      if (msg.type === 'STATE_SYNC') {
+        clientState.latestState = msg;
+        clientState.turnSeconds = msg.effectiveTurnSeconds || msg.turnSeconds || 10;
+        clientState.cardBrand = msg.cardBrand || 'UNO';
+        applyThemeBranding(msg.themeName, msg.cardBrand);
+
+        if (msg.phase === 'lobby') {
+          $('player-join-screen').classList.add('hidden');
+          $('player-game-screen').classList.add('hidden');
+          $('player-waiting-screen').classList.remove('hidden');
+          $('winner-modal').classList.add('hidden');
+          $('player-waiting-theme').textContent = `${msg.themeName || 'UNO 派對大亂鬥'}・等待開局`;
+          $('player-waiting-count').textContent = `${msg.playerCount} 人`;
+          $('player-waiting-timer').textContent = `${msg.turnSeconds} 秒`;
+          const ruleHints = [];
+          if (msg.enableMaxHand) ruleHints.push(`💥 滿 ${msg.maxHandLimit} 張淘汰`);
+          if (msg.enableTimeLimit) ruleHints.push(`⏳ 限時 ${msg.timeLimitMinutes} 分鐘`);
+          ruleHints.push(`🏆 取前 ${msg.winnerCount || 1} 名勝出`);
+          $('player-waiting-rules').textContent = ruleHints.join('｜');
+          clearInterval(clientState.timerInterval);
+          return;
+        }
+
+        if (msg.phase === 'playing') {
+          $('player-join-screen').classList.add('hidden');
+          $('player-waiting-screen').classList.add('hidden');
+          $('player-game-screen').classList.remove('hidden');
+          $('winner-modal').classList.add('hidden');
+          renderClientGame(msg);
+        }
+      }
+    }
+
+    // 渲染手機玩家端畫面
+    function renderClientGame(s) {
+      // 1. 回合與方向資訊
+      const turnLabel = $('player-turn-label');
+      if (s.yourEliminated) {
+        turnLabel.textContent = `💥 你已爆牌淘汰（觀戰中：輪到 ${s.currentPlayerName}）`;
+        turnLabel.className = 'text-sm font-black text-rose-400 truncate';
+      } else if (s.yourFinishedRank > 0) {
+        turnLabel.textContent = `🏆 你已第 ${s.yourFinishedRank} 名完賽！（觀戰中）`;
+        turnLabel.className = 'text-sm font-black text-emerald-300 truncate';
+      } else if (s.isYourTurn) {
+        turnLabel.textContent = '🔥 輪到你了！請快出牌';
+        turnLabel.className = 'text-base font-black text-amber-300 truncate';
+      } else {
+        turnLabel.textContent = `目前輪到：${s.currentPlayerName}`;
+        turnLabel.className = 'text-sm font-bold text-slate-200 truncate';
+      }
+      $('player-dir-label').textContent = `${s.direction === 1 ? '↻ 順時針' : '↺ 逆時針'}｜牌庫剩餘 ${s.deckCount} 張`;
+
+      // 爆牌淘汰或提前完賽提示條
+      const statusBanner = $('player-status-banner');
+      if (s.yourEliminated) {
+        statusBanner.textContent = `💥 手牌達到 ${s.maxHandLimit} 張爆牌淘汰，本局算輸，等待結算中...`;
+        statusBanner.className = 'rounded-2xl border-2 border-rose-500/60 bg-rose-950/80 text-rose-200 px-4 py-2.5 text-center text-xs font-black shadow-lg';
+      } else if (s.yourFinishedRank > 0) {
+        statusBanner.textContent = `🏆 恭喜！你已清空手牌鎖定第 ${s.yourFinishedRank} 名，等待本局結束！`;
+        statusBanner.className = 'rounded-2xl border-2 border-emerald-400/60 bg-emerald-950/80 text-emerald-200 px-4 py-2.5 text-center text-xs font-black shadow-lg';
+      } else {
+        statusBanner.className = 'hidden';
+      }
+
+      // 2. 同步本地倒數計時器（含總遊戲限時）
+      clientState.localDeadline = Date.now() + (s.remainMs || 0);
+      clientState.localMatchDeadline = s.enableTimeLimit ? Date.now() + (s.matchRemainMs || 0) : 0;
+      clientState.lastUrgentSec = -1;
+      clearInterval(clientState.timerInterval);
+
+      // 更新手機端 4 格即時戰況（淘汰 / 完成 / 剩餘人數 / 剩餘時間）與加速 50% 警示
+      $('player-hud-eliminated').textContent = `${s.eliminatedCount || 0} 人`;
+      $('player-hud-finished').textContent = `${s.finishedCount || 0} 人`;
+      $('player-hud-remaining').textContent = `${s.remainingCount || 0} 人`;
+      $('player-rush-banner').classList.toggle('hidden', !s.rushSpeedActive);
+
+      const matchBadge = $('player-match-timer-badge');
+      const playerHudTime = $('player-hud-match-time');
+      if (s.enableTimeLimit) {
+        matchBadge.classList.remove('hidden');
+      } else {
+        matchBadge.classList.add('hidden');
+        playerHudTime.textContent = '不限時';
+        playerHudTime.className = 'text-xs font-black font-mono text-slate-400';
+      }
+
+      const tickClientTimer = () => {
+        const now = Date.now();
+        if (s.enableTimeLimit && clientState.localMatchDeadline > 0) {
+          const fmt = formatMMSS(clientState.localMatchDeadline - now);
+          matchBadge.textContent = s.rushSpeedActive ? `⚡ ${fmt}` : `⏳ ${fmt}`;
+          playerHudTime.textContent = fmt;
+          playerHudTime.className = s.rushSpeedActive
+            ? 'text-xs font-black font-mono text-rose-400 animate-pulse'
+            : 'text-xs font-black font-mono text-emerald-300';
+        }
+        const remainSec = Math.max(0, (clientState.localDeadline - now) / 1000);
+        const pct = Math.max(0, Math.min(100, (remainSec / clientState.turnSeconds) * 100));
+        $('player-timer-text').textContent = `${remainSec.toFixed(1)}s`;
+        $('player-timer-bar').style.width = `${pct}%`;
+
+        const box = $('player-timer-box');
+        if (remainSec <= 3.0 && remainSec > 0) {
+          box.classList.add('timer-urgent');
+          const ceilSec = Math.ceil(remainSec);
+          if (s.isYourTurn && ceilSec !== clientState.lastUrgentSec) {
+            clientState.lastUrgentSec = ceilSec;
+            soundEngine.tickUrgent();
+          }
+        } else {
+          box.classList.remove('timer-urgent');
+        }
+      };
+      tickClientTimer();
+      clientState.timerInterval = setInterval(tickClientTimer, 100);
+
+      // 3. 場上最新一張牌與目前指定顏色
+      if (s.topCard) {
+        $('player-top-card-slot').innerHTML = renderCardHTML(s.topCard, 'w-28 h-40', '', '', clientState.cardBrand);
+      }
+      const cMeta = COLOR_META[s.activeColor] || COLOR_META.red;
+      $('player-color-dot').className = `w-3 h-3 rounded-full ${cMeta.dot}`;
+      $('player-color-name').textContent = `目前顏色：${cMeta.name}`;
+
+      // 4. 操作按鈕狀態
+      const inactiveSelf = Boolean(s.yourEliminated || s.yourFinishedRank > 0);
+      $('btn-player-draw').disabled = !s.isYourTurn || inactiveSelf;
+
+      const canCallUno = !inactiveSelf && s.yourHand.length <= 2 && !s.yourCalledUno;
+      $('btn-player-uno').disabled = !canCallUno;
+      $('btn-player-uno').textContent = s.yourCalledUno ? '✅ 已喊 UNO!' : '📣 喊 UNO!';
+
+      const catchBtn = $('btn-catch-uno');
+      if (s.canCatchUno) {
+        catchBtn.textContent = `🚨 抓 ${s.uncalledPlayerName} 沒喊 UNO！(罰抽 2 張)`;
+        catchBtn.classList.remove('hidden');
+      } else {
+        catchBtn.classList.add('hidden');
+      }
+
+      // 5. 渲染自己的手牌（依顏色與點數排序方便手機閱讀）
+      const colorOrder = { red: 1, yellow: 2, green: 3, blue: 4, wild: 5 };
+      const sortedHand = [...s.yourHand].sort((a, b) => {
+        if (colorOrder[a.color] !== colorOrder[b.color]) return colorOrder[a.color] - colorOrder[b.color];
+        return a.points - b.points;
+      });
+
+      $('player-hand-count').textContent = sortedHand.length;
+      $('player-max-hand-hint').textContent = s.enableMaxHand ? ` / 上限 ${s.maxHandLimit}` : '';
+      $('player-hand-hint').textContent = inactiveSelf
+        ? '目前為觀戰狀態'
+        : (s.isYourTurn ? '點擊發光的牌出牌，或按上方抽牌' : '等待其他玩家出牌中...');
+
+      $('player-hand-list').innerHTML = sortedHand.map(card => {
+        const playable = !inactiveSelf && s.isYourTurn && isCardPlayable(card, s.topCard, s.activeColor);
+        const stateCls = playable ? 'playable' : 'disabled';
+        return renderCardHTML(card, 'hand-card', stateCls, `data-card-id="${card.id}" data-card-color="${card.color}" data-playable="${playable ? '1' : '0'}"`, clientState.cardBrand);
+      }).join('');
+    }
+
+    // 玩家點擊手牌出牌
+    function clientTryPlayCard(cardId, cardColor) {
+      if (!clientState.conn || !clientState.conn.open) {
+        showToast('連線尚未就緒', 'warn');
+        return;
+      }
+      if (cardColor === 'wild') {
+        clientState.pendingWildCardId = cardId;
+        $('color-modal').classList.remove('hidden');
+        return;
+      }
+      soundEngine.playCard();
+      clientState.conn.send({ type: 'PLAY_CARD', cardId, chosenColor: cardColor });
+    }
+
+    // ---------------- 5. 共用 UI 彈窗與輔助函式 ----------------
+    function showWinnerModal(winnerName, ranking, isHost, reason = '', winSlots = 1) {
+      $('winner-modal-title').textContent = winSlots > 1 ? `派對前 ${winSlots} 名贏家！` : '派對大贏家！';
+      $('winner-name').textContent = winnerName;
+      $('winner-reason').textContent = reason || '';
+      $('winner-ranking').innerHTML = ranking.map(r => {
+        let rightLabel = `剩 ${r.cardsLeft} 張`;
+        if (r.eliminated) rightLabel = '<span class="text-rose-400 font-bold">💥 爆牌淘汰</span>';
+        else if (r.isWinner) rightLabel = `<span class="text-amber-300 font-black">🏆 勝出 (${r.cardsLeft} 張)</span>`;
+        return `
+          <div class="flex items-center justify-between py-1.5 border-b border-white/5 last:border-0">
+            <span class="font-bold text-white">#${r.rank} ${escapeHTML(r.name)}</span>
+            <span class="text-slate-400">${rightLabel}</span>
+          </div>
+        `;
+      }).join('');
+
+      if (isHost) {
+        $('btn-play-again').classList.remove('hidden');
+      } else {
+        $('btn-play-again').classList.add('hidden');
+      }
+      $('winner-modal').classList.remove('hidden');
+
+      try {
+        if (typeof confetti === 'function') {
+          confetti({ particleCount: 110, spread: 75, origin: { y: 0.6 } });
+        }
+      } catch {}
+    }
+
+    function escapeHTML(str) {
+      return String(str).replace(/[&<>"']/g, m => ({
+        '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;'
+      }[m]));
+    }
+
+    // 安全複製文字到剪貼簿
+    function copyText(text) {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text)
+          .then(() => showToast('已複製加入連結！快傳給朋友吧', 'success'))
+          .catch(() => fallbackCopy(text));
+      } else {
+        fallbackCopy(text);
+      }
+    }
+    function fallbackCopy(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try {
+        document.execCommand('copy');
+        showToast('已複製加入連結！', 'success');
+      } catch {
+        showToast('請手動全選複製上方網址', 'warn');
+      }
+      ta.remove();
+    }
+
+    // ========================================================================
+    // 6. 事件監聽綁定與雙模式自動分流啟動
+    // ========================================================================
+    function bindEvents() {
+      // 頂部靜音開關 & BGM 快速開關
+      $('btn-mute').addEventListener('click', () => {
+        soundEngine.setMuted(!soundEngine.muted);
+        $('btn-mute').textContent = soundEngine.muted ? '🔇 靜音' : '🔊 音效';
+      });
+      $('btn-bgm-quick').addEventListener('click', () => soundEngine.toggleBgm());
+      $('btn-bgm-toggle').addEventListener('click', () => soundEngine.toggleBgm());
+      $('btn-bgm-reset').addEventListener('click', () => soundEngine.resetBgm());
+
+      // BGM 與音效檔案匯入 & 音量滑桿
+      $('file-bgm').addEventListener('change', (e) => {
+        if (e.target.files && e.target.files[0]) {
+          soundEngine.importBgm(e.target.files[0]);
+          e.target.value = '';
+        }
+      });
+      $('slider-bgm-vol').addEventListener('input', (e) => {
+        const pct = parseInt(e.target.value, 10) || 0;
+        $('val-bgm-vol').textContent = `${pct}%`;
+        soundEngine.setBgmVolume(pct / 100);
+      });
+      $('slider-sfx-vol').addEventListener('input', (e) => {
+        const pct = parseInt(e.target.value, 10) || 0;
+        $('val-sfx-vol').textContent = `${pct}%`;
+        soundEngine.setSfxVolume(pct / 100);
+      });
+
+      // 事件委派：各事件音效試聽 / 匯入 / 重設
+      $('sfx-import-list').addEventListener('click', (e) => {
+        const testBtn = e.target.closest('[data-sfx-test]');
+        if (testBtn) {
+          const key = testBtn.getAttribute('data-sfx-test');
+          if (typeof soundEngine[key] === 'function') soundEngine[key]();
+          return;
+        }
+        const resetBtn = e.target.closest('[data-sfx-reset]');
+        if (resetBtn) {
+          soundEngine.resetSfx(resetBtn.getAttribute('data-sfx-reset'));
+        }
+      });
+      $('sfx-import-list').addEventListener('change', (e) => {
+        const fileInput = e.target.closest('[data-sfx-file]');
+        if (fileInput && fileInput.files && fileInput.files[0]) {
+          soundEngine.importSfx(fileInput.getAttribute('data-sfx-file'), fileInput.files[0]);
+          fileInput.value = '';
+        }
+      });
+
+      // 設定區塊：一鍵隱藏 / 展開
+      $('btn-toggle-settings').addEventListener('click', () => {
+        hostState.settingsCollapsed = !hostState.settingsCollapsed;
+        $('settings-panel-body').classList.toggle('hidden', hostState.settingsCollapsed);
+        $('btn-toggle-settings').textContent = hostState.settingsCollapsed ? '展開設定 ▼' : '隱藏設定 ▲';
+      });
+
+      // 設定區塊：分頁切換 (basic / rules / audio)
+      document.querySelectorAll('[data-settings-tab]').forEach(btn => {
+        btn.addEventListener('click', () => {
+          const target = btn.getAttribute('data-settings-tab');
+          document.querySelectorAll('[data-settings-tab]').forEach(b => b.classList.remove('active'));
+          btn.classList.add('active');
+          ['basic', 'rules', 'audio'].forEach(t => {
+            $(`settings-tab-${t}`).classList.toggle('hidden', t !== target);
+          });
+        });
+      });
+
+      // 主題名稱 & 牌面名稱即時更新
+      $('input-theme-name').addEventListener('input', (e) => {
+        hostState.themeName = e.target.value.trim() || 'UNO 派對大亂鬥';
+        applyThemeBranding(hostState.themeName, hostState.cardBrand);
+        broadcastHostState();
+      });
+      $('input-card-brand').addEventListener('input', (e) => {
+        hostState.cardBrand = e.target.value.trim() || 'UNO';
+        applyThemeBranding(hostState.themeName, hostState.cardBrand);
+        broadcastHostState();
+      });
+
+      // 爆牌淘汰上限設定
+      $('chk-max-hand').addEventListener('change', (e) => {
+        hostState.enableMaxHand = e.target.checked;
+        updateSettingsSummary();
+        broadcastHostState();
+      });
+      $('input-max-hand').addEventListener('input', (e) => {
+        hostState.maxHandLimit = Math.max(8, Math.min(50, parseInt(e.target.value, 10) || 15));
+        updateSettingsSummary();
+        broadcastHostState();
+      });
+
+      // 遊戲總限時與獲勝人數設定
+      $('chk-time-limit').addEventListener('change', (e) => {
+        hostState.enableTimeLimit = e.target.checked;
+        updateSettingsSummary();
+        broadcastHostState();
+      });
+      $('input-time-limit-min').addEventListener('input', (e) => {
+        hostState.timeLimitMinutes = Math.max(1, Math.min(60, parseInt(e.target.value, 10) || 5));
+        updateSettingsSummary();
+        broadcastHostState();
+      });
+      $('input-winner-count').addEventListener('input', (e) => {
+        hostState.winnerCount = Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 1));
+        updateSettingsSummary();
+        broadcastHostState();
+      });
+
+      // 房主大廳：複製連結
+      $('btn-copy-url').addEventListener('click', () => {
+        copyText($('host-join-url').value);
+      });
+
+      // 房主大廳：切換到手動輸入房號加入
+      $('btn-switch-to-join').addEventListener('click', () => {
+        initPlayerMode('');
+      });
+
+      // 玩家端：切回房主開新房間
+      $('btn-back-to-host').addEventListener('click', () => {
+        initHostMode();
+      });
+
+      // 房主大廳：出牌倒數秒數滑桿 (1~20 秒)
+      $('turn-seconds-slider').addEventListener('input', (e) => {
+        const val = Math.max(1, Math.min(20, parseInt(e.target.value, 10) || 10));
+        hostState.turnSeconds = val;
+        $('turn-seconds-display').textContent = val;
+        updateSettingsSummary();
+        broadcastHostState();
+      });
+
+      // 房主大廳：新增電腦測試玩家 & 開始遊戲
+      $('btn-add-bot').addEventListener('click', hostAddBot);
+      $('btn-start-game').addEventListener('click', hostStartGame);
+      $('btn-host-back-lobby').addEventListener('click', hostBackToLobby);
+
+      // 房主大廳與遊戲中：事件委派處理踢除玩家按鈕
+      $('host-root').addEventListener('click', (e) => {
+        const btn = e.target.closest('[data-kick-id]');
+        if (btn) {
+          hostKickPlayer(btn.getAttribute('data-kick-id'));
+        }
+      });
+
+      // 手機玩家端：報到按鈕與 Enter 鍵送出
+      $('btn-player-join').addEventListener('click', clientConnectToRoom);
+      $('input-nickname').addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') clientConnectToRoom();
+      });
+
+      // 手機玩家端：抽牌、喊 UNO、抓沒喊 UNO
+      $('btn-player-draw').addEventListener('click', () => {
+        if (clientState.conn && clientState.conn.open) {
+          soundEngine.drawCard();
+          clientState.conn.send({ type: 'DRAW_CARD' });
+        }
+      });
+      $('btn-player-uno').addEventListener('click', () => {
+        if (clientState.conn && clientState.conn.open) {
+          soundEngine.unoShout();
+          clientState.conn.send({ type: 'CALL_UNO' });
+        }
+      });
+      $('btn-catch-uno').addEventListener('click', () => {
+        if (clientState.conn && clientState.conn.open) {
+          clientState.conn.send({ type: 'CATCH_UNO' });
+        }
+      });
+
+      // 手機玩家端：點擊手牌出牌（事件委派）
+      $('player-hand-list').addEventListener('click', (e) => {
+        const cardEl = e.target.closest('[data-card-id]');
+        if (!cardEl) return;
+        if (cardEl.getAttribute('data-playable') !== '1') {
+          showToast('這張牌目前無法打出，請選亮起的牌或抽牌', 'warn');
+          return;
+        }
+        clientTryPlayCard(
+          cardEl.getAttribute('data-card-id'),
+          cardEl.getAttribute('data-card-color')
+        );
+      });
+
+      // 萬用牌選色視窗
+      $('color-modal').addEventListener('click', (e) => {
+        const pickBtn = e.target.closest('[data-pick-color]');
+        if (pickBtn && clientState.pendingWildCardId) {
+          const chosenColor = pickBtn.getAttribute('data-pick-color');
+          const cardId = clientState.pendingWildCardId;
+          clientState.pendingWildCardId = null;
+          $('color-modal').classList.add('hidden');
+          soundEngine.playCard();
+          if (clientState.conn && clientState.conn.open) {
+            clientState.conn.send({ type: 'PLAY_CARD', cardId, chosenColor });
+          }
+        }
+      });
+      $('btn-cancel-color').addEventListener('click', () => {
+        clientState.pendingWildCardId = null;
+        $('color-modal').classList.add('hidden');
+      });
+
+      // 勝利彈窗按鈕
+      $('btn-play-again').addEventListener('click', hostBackToLobby);
+      $('btn-close-winner').addEventListener('click', () => {
+        $('winner-modal').classList.add('hidden');
+      });
+    }
+
+    // 頁面載入後自動偵測網址參數 ?room=XXXX 進行雙模式分流
+    window.addEventListener('DOMContentLoaded', () => {
+      bindEvents();
+      const params = new URLSearchParams(window.location.search);
+      const roomParam = (params.get('room') || '').trim().toUpperCase();
+      if (roomParam) {
+        initPlayerMode(roomParam);
+      } else {
+        initHostMode();
+      }
+    });
+  </script>
+</body>
+</html>
